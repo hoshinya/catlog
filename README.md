@@ -10,6 +10,8 @@
 - `config.js`: Google OAuth 設定
 - `config.example.js`: Google OAuth 設定の見本
 - `start-local.ps1`: 空いているポートでローカル起動する PowerShell スクリプト
+- `manifest.webmanifest`: PWA 設定
+- `sw.js`: オフライン用の Service Worker
 
 ## 最短で試す方法
 
@@ -43,6 +45,26 @@
 - `http://127.0.0.1:8003`
 
 URL のパスは不要です。必要なのは `スキーム + ホスト + ポート` です。
+
+## PWA として使う
+
+GitHub Pages のような `https://` 配信で開くと、Catlog をスマホのホーム画面に追加できます。
+
+- Android Chrome 系:
+  - 画面内に `インストール` ボタンが出たら、それを押します
+- iPhone Safari:
+  - 共有メニューから `ホーム画面に追加` を選びます
+
+PWA 化により次が有効になります。
+
+- ホーム画面からアプリのように起動
+- 全画面に近い表示で利用
+- アプリ本体の静的ファイルをキャッシュして表示を高速化
+
+補足:
+
+- Google Drive への読込と保存にはネット接続が必要です
+- オフライン中でも画面の起動自体はできますが、同期はオンライン復帰後に行ってください
 
 ## Google Cloud 設定
 

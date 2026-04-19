@@ -6,6 +6,7 @@ const state = {
   tokenClient: null,
   entries: [],
   previewUrl: null,
+  installPrompt: null,
   drive: {
     rootFolderId: null,
     photosFolderId: null,
@@ -18,6 +19,8 @@ const elements = {
   syncStatus: document.getElementById("sync-status"),
   connectButton: document.getElementById("connect-button"),
   reloadButton: document.getElementById("reload-button"),
+  installCard: document.getElementById("install-card"),
+  installButton: document.getElementById("install-button"),
   entryForm: document.getElementById("entry-form"),
   date: document.getElementById("date"),
   photoInput: document.getElementById("photo"),
@@ -40,10 +43,18 @@ function bootstrap() {
     }
     await loadEntriesFromDrive();
   });
+  elements.installButton.addEventListener("click", installApp);
   elements.photoInput.addEventListener("change", handlePhotoPreview);
   elements.entryForm.addEventListener("submit", handleSubmit);
+  window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+  window.addEventListener("appinstalled", handleAppInstalled);
+  window.addEventListener("online", handleConnectivityChange);
+  window.addEventListener("offline", handleConnectivityChange);
 
   validateConfig();
+  registerServiceWorker();
+  refreshInstallUI();
+  handleConnectivityChange();
   renderEntries();
 }
 
@@ -55,6 +66,11 @@ function validateConfig() {
 }
 
 function connectGoogleDrive() {
+  if (!navigator.onLine) {
+    showToast("オフライン中は Google Drive に接続できません。");
+    return;
+  }
+
   if (!window.google?.accounts?.oauth2) {
     showToast("Google 認証ライブラリの読み込みを待ってから再度お試しください。");
     return;
@@ -88,6 +104,11 @@ async function handleSubmit(event) {
 
   if (!state.accessToken) {
     showToast("保存するには Google Drive に接続してください。");
+    return;
+  }
+
+  if (!navigator.onLine) {
+    showToast("オフライン中は保存できません。");
     return;
   }
 
@@ -364,6 +385,54 @@ function renderEntries() {
 function updateAuthUI(isConnected) {
   elements.authStatus.textContent = isConnected ? "接続済み" : "未接続";
   elements.reloadButton.disabled = !isConnected;
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+
+  try {
+    await navigator.serviceWorker.register("./sw.js");
+  } catch (error) {
+    console.error("Service worker registration failed:", error);
+  }
+}
+
+function handleBeforeInstallPrompt(event) {
+  event.preventDefault();
+  state.installPrompt = event;
+  refreshInstallUI();
+}
+
+function handleAppInstalled() {
+  state.installPrompt = null;
+  refreshInstallUI();
+  showToast("Catlog をホーム画面に追加しました。");
+}
+
+async function installApp() {
+  if (!state.installPrompt) {
+    showToast("ブラウザの共有メニューからホーム画面に追加できる場合があります。");
+    return;
+  }
+
+  state.installPrompt.prompt();
+  await state.installPrompt.userChoice;
+  state.installPrompt = null;
+  refreshInstallUI();
+}
+
+function refreshInstallUI() {
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+  elements.installCard.hidden = isStandalone || !state.installPrompt;
+}
+
+function handleConnectivityChange() {
+  document.body.classList.toggle("is-offline", !navigator.onLine);
+  if (!navigator.onLine) {
+    setSyncMessage("オフライン中です。閲覧はできますが、Google Drive との同期はネット接続後に行ってください。");
+  }
 }
 
 function setSyncMessage(message) {

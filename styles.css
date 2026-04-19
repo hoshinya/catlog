@@ -27,6 +27,7 @@ body {
     radial-gradient(circle at top left, rgba(255, 255, 255, 0.75), transparent 28%),
     radial-gradient(circle at right 20%, rgba(184, 92, 56, 0.14), transparent 30%),
     linear-gradient(180deg, var(--bg-accent), var(--bg));
+  -webkit-tap-highlight-color: transparent;
 }
 
 img {
@@ -102,6 +103,14 @@ h2 {
   display: grid;
   grid-template-columns: minmax(320px, 420px) 1fr;
   gap: 24px;
+}
+
+.install-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 24px;
 }
 
 .card {
@@ -281,6 +290,10 @@ h2 {
   box-shadow: var(--shadow);
 }
 
+body.is-offline .hero__status {
+  border-color: rgba(184, 92, 56, 0.32);
+}
+
 @media (max-width: 900px) {
   .hero,
   .layout,
@@ -288,9 +301,15 @@ h2 {
     grid-template-columns: 1fr;
   }
 
+  .install-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .page-shell {
     width: min(100% - 24px, 720px);
     padding-top: 20px;
+    padding-bottom: calc(36px + env(safe-area-inset-bottom));
   }
 
   .hero__copy,
@@ -300,5 +319,17 @@ h2 {
 
   h1 {
     font-size: clamp(2.4rem, 13vw, 3.8rem);
+  }
+
+  .button,
+  .field input,
+  .field textarea {
+    font-size: 16px;
+  }
+
+  .toast {
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
   }
 }

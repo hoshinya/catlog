@@ -4,6 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Catlog</title>
+  <meta name="theme-color" content="#b85c38">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Catlog">
+  <meta name="description" content="猫の体重、食べ物、健康状態、写真を記録して Google Drive に保存するアプリ。">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
@@ -35,6 +42,17 @@
         </div>
       </div>
     </header>
+
+    <section id="install-card" class="card install-card" hidden>
+      <div>
+        <p class="section-heading__eyebrow">Install app</p>
+        <h2>ホーム画面に追加</h2>
+        <p class="section-heading__note">
+          スマホからワンタップで開けるように、Catlog をアプリとして追加できます。
+        </p>
+      </div>
+      <button id="install-button" class="button button--primary" type="button">インストール</button>
+    </section>
 
     <main class="layout">
       <section class="card">

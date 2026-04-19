@@ -1,0 +1,26 @@
+{
+  "name": "Catlog",
+  "short_name": "Catlog",
+  "description": "猫の体重、食べ物、健康状態、写真を記録して Google Drive に保存するアプリ。",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6efe3",
+  "theme_color": "#b85c38",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
