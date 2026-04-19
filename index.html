@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Catlog</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero__copy">
+        <p class="eyebrow">Google Drive synced cat journal</p>
+        <h1>猫の毎日を、やさしく残す。</h1>
+        <p class="hero__text">
+          体重、食べたもの、健康状態、写真をまとめて記録し、
+          Google Drive に保存できるシンプルな Catlog アプリです。
+        </p>
+      </div>
+
+      <div class="hero__status card">
+        <div class="status-line">
+          <span class="status-label">接続状態</span>
+          <strong id="auth-status">未接続</strong>
+        </div>
+        <p class="status-help" id="sync-status">
+          Google Drive に接続すると保存と読込ができます。
+        </p>
+        <div class="hero__actions">
+          <button id="connect-button" class="button button--primary" type="button">Google Drive に接続</button>
+          <button id="reload-button" class="button button--ghost" type="button" disabled>Drive から再読込</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <p class="section-heading__eyebrow">New entry</p>
+            <h2>記録を追加</h2>
+          </div>
+          <p class="section-heading__note">保存時に JSON と写真を Google Drive へアップロードします。</p>
+        </div>
+
+        <form id="entry-form" class="entry-form">
+          <label class="field">
+            <span>記録日</span>
+            <input id="date" name="date" type="date" required>
+          </label>
+
+          <label class="field">
+            <span>体重 (kg)</span>
+            <input id="weight" name="weight" type="number" min="0" step="0.01" placeholder="4.25" required>
+          </label>
+
+          <label class="field">
+            <span>食べ物</span>
+            <textarea id="food" name="food" rows="3" placeholder="朝: ドライフード 25g / 夜: ウェット 1袋" required></textarea>
+          </label>
+
+          <label class="field">
+            <span>健康状態</span>
+            <textarea id="health" name="health" rows="4" placeholder="元気、食欲あり。少しくしゃみ。" required></textarea>
+          </label>
+
+          <label class="field">
+            <span>写真</span>
+            <input id="photo" name="photo" type="file" accept="image/*">
+          </label>
+
+          <div class="preview" id="photo-preview" hidden>
+            <img id="preview-image" alt="選択した写真のプレビュー">
+          </div>
+
+          <button class="button button--primary button--wide" type="submit">記録を保存</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <p class="section-heading__eyebrow">History</p>
+            <h2>記録一覧</h2>
+          </div>
+          <p class="section-heading__note">新しい順に表示されます。</p>
+        </div>
+
+        <div id="entries-empty" class="empty-state">
+          まだ記録がありません。最初の 1 件を追加してみましょう。
+        </div>
+        <div id="entries-list" class="entries-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="config.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
