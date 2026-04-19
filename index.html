@@ -21,24 +21,26 @@
     <header class="hero">
       <div class="hero__copy">
         <p class="eyebrow">Google Drive synced cat journal</p>
-        <h1>猫の毎日を、やさしく残す。</h1>
+        <h1>猫記録</h1>
         <p class="hero__text">
-          体重、食べたもの、健康状態、写真をまとめて記録し、
-          Google Drive に保存できるシンプルな Catlog アプリです。
+          体重、食べ物、健康状態、写真をまとめて記録し、
+          Google Drive に保存できる猫と暮らしの記録アプリです。
         </p>
       </div>
 
-      <div class="hero__status card">
-        <div class="status-line">
-          <span class="status-label">接続状態</span>
-          <strong id="auth-status">未接続</strong>
-        </div>
-        <p class="status-help" id="sync-status">
-          Google Drive に接続すると保存と読込ができます。
-        </p>
-        <div class="hero__actions">
-          <button id="connect-button" class="button button--primary" type="button">Google Drive に接続</button>
-          <button id="reload-button" class="button button--ghost" type="button" disabled>Drive から再読込</button>
+      <div class="hero__status card hero__status--compact">
+        <div class="status-inline">
+          <div>
+            <span class="status-label">接続状態</span>
+            <strong id="auth-status">未接続</strong>
+            <p class="status-help" id="sync-status">
+              Google Drive に接続すると保存と読込ができます。
+            </p>
+          </div>
+          <div class="hero__actions">
+            <button id="connect-button" class="button button--primary" type="button">Google Drive に接続</button>
+            <button id="reload-button" class="button button--ghost" type="button" disabled>再読込</button>
+          </div>
         </div>
       </div>
     </header>
@@ -54,14 +56,34 @@
       <button id="install-button" class="button button--primary" type="button">インストール</button>
     </section>
 
+    <section class="card graph-card">
+      <div class="section-heading">
+        <div>
+          <p class="section-heading__eyebrow">Trend</p>
+          <h2>体重グラフ</h2>
+        </div>
+        <p class="section-heading__note">猫と飼い主の体重推移をまとめて確認できます。</p>
+      </div>
+      <div id="graph-empty" class="empty-state">
+        記録が増えると、ここに体重の推移が表示されます。
+      </div>
+      <div id="graph-area" class="graph-area" hidden>
+        <div class="graph-legend">
+          <span><i class="legend-swatch legend-swatch--cat"></i>猫の体重</span>
+          <span><i class="legend-swatch legend-swatch--owner"></i>飼い主の体重</span>
+        </div>
+        <svg id="weight-graph" class="weight-graph" viewBox="0 0 720 260" preserveAspectRatio="none" aria-label="体重グラフ"></svg>
+      </div>
+    </section>
+
     <main class="layout">
-      <section class="card">
+      <section class="card form-card">
         <div class="section-heading">
           <div>
             <p class="section-heading__eyebrow">New entry</p>
-            <h2>記録を追加</h2>
+            <h2 id="form-title">記録を追加</h2>
           </div>
-          <p class="section-heading__note">保存時に JSON と写真を Google Drive へアップロードします。</p>
+          <p class="section-heading__note" id="form-note">保存時に JSON と写真を Google Drive へアップロードします。</p>
         </div>
 
         <form id="entry-form" class="entry-form">
@@ -76,14 +98,40 @@
           </label>
 
           <label class="field">
+            <span>飼い主の体重 (kg)</span>
+            <input id="owner-weight" name="ownerWeight" type="number" min="0" step="0.1" placeholder="58.2">
+          </label>
+
+          <div class="field">
             <span>食べ物</span>
-            <textarea id="food" name="food" rows="3" placeholder="朝: ドライフード 25g / 夜: ウェット 1袋" required></textarea>
+            <div class="food-composer">
+              <input id="food-input" type="text" placeholder="食べたものを追加">
+              <button id="add-food-button" class="button button--ghost" type="button">追加</button>
+            </div>
+            <div id="food-list-empty" class="mini-note">まだ追加されていません。</div>
+            <div id="food-list" class="chip-list"></div>
+          </div>
+
+          <label class="field">
+            <span>給水量 (ml)</span>
+            <input id="water-intake" name="waterIntake" type="number" min="0" step="1" placeholder="180">
           </label>
 
           <label class="field">
             <span>健康状態</span>
             <textarea id="health" name="health" rows="4" placeholder="元気、食欲あり。少しくしゃみ。" required></textarea>
           </label>
+
+          <div class="field field--inline">
+            <label>
+              <span>おしっこ回数</span>
+              <input id="pee-count" name="peeCount" type="number" min="0" step="1" placeholder="2">
+            </label>
+            <label>
+              <span>うんち回数</span>
+              <input id="poop-count" name="poopCount" type="number" min="0" step="1" placeholder="1">
+            </label>
+          </div>
 
           <label class="field">
             <span>写真</span>
@@ -94,7 +142,10 @@
             <img id="preview-image" alt="選択した写真のプレビュー">
           </div>
 
-          <button class="button button--primary button--wide" type="submit">記録を保存</button>
+          <div class="form-actions">
+            <button id="save-button" class="button button--primary button--wide" type="submit">記録を保存</button>
+            <button id="cancel-edit-button" class="button button--ghost button--wide" type="button" hidden>編集をキャンセル</button>
+          </div>
         </form>
       </section>
 

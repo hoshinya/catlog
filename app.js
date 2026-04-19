@@ -7,6 +7,8 @@ const state = {
   entries: [],
   previewUrl: null,
   installPrompt: null,
+  editingEntryId: null,
+  draftFoods: [],
   drive: {
     rootFolderId: null,
     photosFolderId: null,
@@ -21,20 +23,38 @@ const elements = {
   reloadButton: document.getElementById("reload-button"),
   installCard: document.getElementById("install-card"),
   installButton: document.getElementById("install-button"),
+  formTitle: document.getElementById("form-title"),
+  formNote: document.getElementById("form-note"),
+  cancelEditButton: document.getElementById("cancel-edit-button"),
+  saveButton: document.getElementById("save-button"),
   entryForm: document.getElementById("entry-form"),
   date: document.getElementById("date"),
+  weight: document.getElementById("weight"),
+  ownerWeight: document.getElementById("owner-weight"),
+  foodInput: document.getElementById("food-input"),
+  addFoodButton: document.getElementById("add-food-button"),
+  foodList: document.getElementById("food-list"),
+  foodListEmpty: document.getElementById("food-list-empty"),
+  waterIntake: document.getElementById("water-intake"),
+  health: document.getElementById("health"),
+  peeCount: document.getElementById("pee-count"),
+  poopCount: document.getElementById("poop-count"),
   photoInput: document.getElementById("photo"),
   photoPreview: document.getElementById("photo-preview"),
   previewImage: document.getElementById("preview-image"),
   entriesList: document.getElementById("entries-list"),
   entriesEmpty: document.getElementById("entries-empty"),
+  graphArea: document.getElementById("graph-area"),
+  graphEmpty: document.getElementById("graph-empty"),
+  weightGraph: document.getElementById("weight-graph"),
   toast: document.getElementById("toast")
 };
 
 bootstrap();
 
 function bootstrap() {
-  elements.date.value = new Date().toISOString().slice(0, 10);
+  resetForm();
+
   elements.connectButton.addEventListener("click", connectGoogleDrive);
   elements.reloadButton.addEventListener("click", async () => {
     if (!state.accessToken) {
@@ -44,8 +64,21 @@ function bootstrap() {
     await loadEntriesFromDrive();
   });
   elements.installButton.addEventListener("click", installApp);
+  elements.addFoodButton.addEventListener("click", addFoodItemFromInput);
+  elements.foodInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addFoodItemFromInput();
+    }
+  });
+  elements.foodList.addEventListener("click", handleFoodListClick);
   elements.photoInput.addEventListener("change", handlePhotoPreview);
   elements.entryForm.addEventListener("submit", handleSubmit);
+  elements.cancelEditButton.addEventListener("click", () => {
+    resetForm();
+    showToast("編集をキャンセルしました。");
+  });
+  elements.entriesList.addEventListener("click", handleEntryListClick);
   window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
   window.addEventListener("appinstalled", handleAppInstalled);
   window.addEventListener("online", handleConnectivityChange);
@@ -55,7 +88,22 @@ function bootstrap() {
   registerServiceWorker();
   refreshInstallUI();
   handleConnectivityChange();
+  renderFoodDraft();
   renderEntries();
+  renderGraph();
+}
+
+function resetForm() {
+  elements.entryForm.reset();
+  elements.date.value = new Date().toISOString().slice(0, 10);
+  elements.formTitle.textContent = "記録を追加";
+  elements.formNote.textContent = "保存時に JSON と写真を Google Drive へアップロードします。";
+  elements.saveButton.textContent = "記録を保存";
+  elements.cancelEditButton.hidden = true;
+  state.editingEntryId = null;
+  state.draftFoods = [];
+  renderFoodDraft();
+  clearPhotoPreview();
 }
 
 function validateConfig() {
@@ -112,47 +160,113 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (state.draftFoods.length === 0) {
+    showToast("食べ物を少なくとも 1 件追加してください。");
+    return;
+  }
+
   const formData = new FormData(elements.entryForm);
+  const existing = state.entries.find((entry) => entry.id === state.editingEntryId) || null;
   const entry = {
-    id: crypto.randomUUID(),
+    id: existing?.id || crypto.randomUUID(),
     date: formData.get("date"),
     weight: Number(formData.get("weight")),
-    food: String(formData.get("food")).trim(),
+    ownerWeight: parseOptionalNumber(formData.get("ownerWeight")),
+    foods: state.draftFoods.map((item) => ({ ...item })),
+    waterIntake: parseOptionalNumber(formData.get("waterIntake")),
     health: String(formData.get("health")).trim(),
-    createdAt: new Date().toISOString(),
-    photo: null
+    peeCount: parseOptionalInteger(formData.get("peeCount")),
+    poopCount: parseOptionalInteger(formData.get("poopCount")),
+    createdAt: existing?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    photo: existing?.photo || null
   };
 
   const photoFile = elements.photoInput.files[0];
 
   try {
-    elements.entryForm.querySelector('button[type="submit"]').disabled = true;
+    elements.saveButton.disabled = true;
     setSyncMessage("Google Drive に保存しています...");
 
     if (photoFile) {
       entry.photo = await uploadPhoto(photoFile, entry.id);
     }
 
-    state.entries = [entry, ...state.entries].sort(sortEntries);
+    if (existing) {
+      state.entries = state.entries.map((item) => (item.id === entry.id ? entry : item));
+    } else {
+      state.entries = [entry, ...state.entries];
+    }
+
+    state.entries = state.entries.map(normalizeEntry).sort(sortEntries);
     await saveEntriesToDrive();
     renderEntries();
-    elements.entryForm.reset();
-    elements.date.value = new Date().toISOString().slice(0, 10);
-    clearPhotoPreview();
+    renderGraph();
+    resetForm();
     setSyncMessage("Google Drive と同期済みです。");
-    showToast("記録を保存しました。");
+    showToast(existing ? "記録を更新しました。" : "記録を保存しました。");
   } catch (error) {
     console.error(error);
     setSyncMessage("保存に失敗しました。設定や権限をご確認ください。");
     showToast("保存に失敗しました。");
   } finally {
-    elements.entryForm.querySelector('button[type="submit"]').disabled = false;
+    elements.saveButton.disabled = false;
   }
+}
+
+function addFoodItemFromInput() {
+  const text = elements.foodInput.value.trim();
+  if (!text) {
+    return;
+  }
+
+  state.draftFoods.push({
+    id: crypto.randomUUID(),
+    label: text,
+    time: currentTimeLabel()
+  });
+  elements.foodInput.value = "";
+  renderFoodDraft();
+}
+
+function renderFoodDraft() {
+  elements.foodList.innerHTML = "";
+  elements.foodListEmpty.hidden = state.draftFoods.length > 0;
+
+  state.draftFoods.forEach((item) => {
+    const chip = document.createElement("div");
+    chip.className = "chip";
+    chip.innerHTML = `
+      <span class="chip__time">${escapeHtml(item.time)}</span>
+      <span>${escapeHtml(item.label)}</span>
+      <button class="chip__remove" type="button" data-food-id="${item.id}" aria-label="食べ物を削除">×</button>
+    `;
+    elements.foodList.appendChild(chip);
+  });
+}
+
+function handleFoodListClick(event) {
+  const button = event.target.closest("[data-food-id]");
+  if (!button) {
+    return;
+  }
+
+  const foodId = button.dataset.foodId;
+  state.draftFoods = state.draftFoods.filter((item) => item.id !== foodId);
+  renderFoodDraft();
 }
 
 function handlePhotoPreview(event) {
   const file = event.target.files[0];
   if (!file) {
+    if (state.editingEntryId) {
+      const editingEntry = state.entries.find((entry) => entry.id === state.editingEntryId);
+      if (editingEntry?.photo?.url) {
+        elements.previewImage.src = editingEntry.photo.url;
+        elements.photoPreview.hidden = false;
+        return;
+      }
+    }
     clearPhotoPreview();
     return;
   }
@@ -176,6 +290,50 @@ function clearPhotoPreview() {
   elements.photoPreview.hidden = true;
 }
 
+function startEditing(entryId) {
+  const entry = state.entries.find((item) => item.id === entryId);
+  if (!entry) {
+    return;
+  }
+
+  state.editingEntryId = entry.id;
+  elements.formTitle.textContent = "記録を編集";
+  elements.formNote.textContent = "内容を修正して保存すると Google Drive 側も更新されます。";
+  elements.saveButton.textContent = "変更を保存";
+  elements.cancelEditButton.hidden = false;
+
+  elements.date.value = entry.date;
+  elements.weight.value = entry.weight ?? "";
+  elements.ownerWeight.value = entry.ownerWeight ?? "";
+  elements.waterIntake.value = entry.waterIntake ?? "";
+  elements.health.value = entry.health ?? "";
+  elements.peeCount.value = entry.peeCount ?? "";
+  elements.poopCount.value = entry.poopCount ?? "";
+  state.draftFoods = entry.foods.map((item) => ({ ...item }));
+  renderFoodDraft();
+
+  if (entry.photo?.url) {
+    clearPhotoPreview();
+    elements.previewImage.src = entry.photo.url;
+    elements.photoPreview.hidden = false;
+  } else {
+    clearPhotoPreview();
+  }
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function handleEntryListClick(event) {
+  const button = event.target.closest("[data-action]");
+  if (!button) {
+    return;
+  }
+
+  if (button.dataset.action === "edit-entry") {
+    startEditing(button.dataset.entryId);
+  }
+}
+
 async function ensureDriveStructure() {
   const rootFolderName = config.driveRootFolderName || "Catlog";
   const photosFolderName = config.photosFolderName || "photos";
@@ -194,6 +352,7 @@ async function loadEntriesFromDrive() {
   if (!state.drive.entriesFileId) {
     state.entries = [];
     renderEntries();
+    renderGraph();
     setSyncMessage("保存先は準備できています。最初の記録を追加してください。");
     return;
   }
@@ -203,8 +362,9 @@ async function loadEntriesFromDrive() {
   );
 
   const data = await response.json();
-  state.entries = Array.isArray(data.entries) ? data.entries.sort(sortEntries) : [];
+  state.entries = Array.isArray(data.entries) ? data.entries.map(normalizeEntry).sort(sortEntries) : [];
   renderEntries();
+  renderGraph();
   setSyncMessage(`${state.entries.length} 件の記録を Google Drive から読み込みました。`);
 }
 
@@ -369,10 +529,28 @@ function renderEntries() {
     article.className = "entry-card";
     article.innerHTML = `
       <div>
-        <p class="entry-meta">${formatDate(entry.date)} / ${entry.weight.toFixed(2)} kg</p>
+        <p class="entry-meta">${formatDate(entry.date)} / 猫 ${formatNumber(entry.weight, 2)} kg / 飼い主 ${formatOptional(entry.ownerWeight, "kg", 1)}</p>
         <h3>${escapeHtml(formatHealthHeadline(entry.health))}</h3>
-        <p><strong>食べ物:</strong> ${escapeHtml(entry.food)}</p>
+        <div class="entry-stats">
+          <div class="stat-tile">
+            <span>給水量</span>
+            <strong>${formatOptional(entry.waterIntake, "ml", 0)}</strong>
+          </div>
+          <div class="stat-tile">
+            <span>排泄</span>
+            <strong>尿 ${formatCount(entry.peeCount)} / 便 ${formatCount(entry.poopCount)}</strong>
+          </div>
+        </div>
         <p><strong>健康状態:</strong> ${escapeHtml(entry.health)}</p>
+        <div>
+          <strong>食べ物:</strong>
+          <ul class="entry-food-list">
+            ${entry.foods.map((food) => `<li><time>${escapeHtml(food.time || "--:--")}</time>${escapeHtml(food.label)}</li>`).join("")}
+          </ul>
+        </div>
+        <div class="entry-actions">
+          <button class="button button--ghost" type="button" data-action="edit-entry" data-entry-id="${entry.id}">編集</button>
+        </div>
       </div>
       <div>
         ${entry.photo?.url ? `<img class="entry-photo" src="${entry.photo.url}" alt="猫の記録写真">` : '<div class="empty-state">写真なし</div>'}
@@ -380,6 +558,128 @@ function renderEntries() {
     `;
     elements.entriesList.appendChild(article);
   });
+}
+
+function renderGraph() {
+  const graphEntries = [...state.entries]
+    .filter((entry) => Number.isFinite(entry.weight))
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  if (graphEntries.length < 2) {
+    elements.graphArea.hidden = true;
+    elements.graphEmpty.hidden = false;
+    elements.weightGraph.innerHTML = "";
+    return;
+  }
+
+  const catValues = graphEntries.map((entry) => entry.weight);
+  const ownerValues = graphEntries.map((entry) => entry.ownerWeight).filter((value) => Number.isFinite(value));
+  const catMin = Math.min(...catValues);
+  const catMax = Math.max(...catValues);
+  const ownerMin = ownerValues.length ? Math.min(...ownerValues) : null;
+  const ownerMax = ownerValues.length ? Math.max(...ownerValues) : null;
+  const width = 720;
+  const height = 260;
+  const left = 56;
+  const right = 56;
+  const top = 20;
+  const bottom = 44;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const catRange = Math.max(catMax - catMin, 0.5);
+  const ownerRange = Math.max((ownerMax ?? 0) - (ownerMin ?? 0), 0.5);
+  const yForCat = (value) => top + ((catMax - value) / catRange) * plotHeight;
+  const yForOwner = (value) => top + (((ownerMax ?? value) - value) / ownerRange) * plotHeight;
+  const xFor = (index) => left + (graphEntries.length === 1 ? 0 : (index / (graphEntries.length - 1)) * plotWidth);
+
+  const catPoints = graphEntries.map((entry, index) => `${xFor(index)},${yForCat(entry.weight)}`).join(" ");
+  const ownerPoints = graphEntries
+    .map((entry, index) => (Number.isFinite(entry.ownerWeight) ? `${xFor(index)},${yForOwner(entry.ownerWeight)}` : null))
+    .filter(Boolean)
+    .join(" ");
+
+  const gridLines = Array.from({ length: 4 }, (_, index) => {
+    const ratio = index / 3;
+    const y = top + plotHeight * ratio;
+    const catValue = catMax - catRange * ratio;
+    const ownerValue = ownerValues.length ? (ownerMax - ownerRange * ratio) : null;
+    return `
+      <line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" stroke="rgba(112,89,70,0.15)" stroke-width="1" />
+      <text x="${left - 10}" y="${y + 4}" text-anchor="end" fill="#b85c38" font-size="12">${catValue.toFixed(1)}</text>
+      ${ownerValue !== null ? `<text x="${width - right + 10}" y="${y + 4}" text-anchor="start" fill="#2f6f83" font-size="12">${ownerValue.toFixed(1)}</text>` : ""}
+    `;
+  }).join("");
+
+  const xLabels = graphEntries.map((entry, index) => {
+    const x = xFor(index);
+    return `<text x="${x}" y="${height - 16}" text-anchor="middle" fill="#705946" font-size="11">${formatGraphDate(entry.date)}</text>`;
+  }).join("");
+
+  const catDots = graphEntries.map((entry, index) => {
+    const x = xFor(index);
+    const y = yForCat(entry.weight);
+    return `<circle cx="${x}" cy="${y}" r="4.5" fill="#b85c38" />`;
+  }).join("");
+
+  const ownerDots = graphEntries.map((entry, index) => {
+    if (!Number.isFinite(entry.ownerWeight)) {
+      return "";
+    }
+    const x = xFor(index);
+    const y = yForOwner(entry.ownerWeight);
+    return `<circle cx="${x}" cy="${y}" r="4.5" fill="#2f6f83" />`;
+  }).join("");
+
+  elements.weightGraph.innerHTML = `
+    <rect x="0" y="0" width="${width}" height="${height}" fill="transparent" />
+    ${gridLines}
+    <polyline fill="none" stroke="#b85c38" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" points="${catPoints}" />
+    ${ownerPoints ? `<polyline fill="none" stroke="#2f6f83" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" points="${ownerPoints}" />` : ""}
+    ${catDots}
+    ${ownerDots}
+    ${xLabels}
+  `;
+
+  elements.graphArea.hidden = false;
+  elements.graphEmpty.hidden = true;
+}
+
+function normalizeEntry(entry) {
+  const foods = normalizeFoods(entry);
+  return {
+    id: entry.id || crypto.randomUUID(),
+    date: entry.date || new Date().toISOString().slice(0, 10),
+    weight: Number(entry.weight || 0),
+    ownerWeight: parseOptionalNumber(entry.ownerWeight),
+    foods,
+    waterIntake: parseOptionalInteger(entry.waterIntake),
+    health: String(entry.health || "").trim(),
+    peeCount: parseOptionalInteger(entry.peeCount),
+    poopCount: parseOptionalInteger(entry.poopCount),
+    createdAt: entry.createdAt || new Date().toISOString(),
+    updatedAt: entry.updatedAt || entry.createdAt || new Date().toISOString(),
+    photo: entry.photo || null
+  };
+}
+
+function normalizeFoods(entry) {
+  if (Array.isArray(entry.foods)) {
+    return entry.foods.map((item) => ({
+      id: item.id || crypto.randomUUID(),
+      label: String(item.label || "").trim(),
+      time: item.time || "--:--"
+    })).filter((item) => item.label);
+  }
+
+  if (typeof entry.food === "string" && entry.food.trim()) {
+    return [{
+      id: crypto.randomUUID(),
+      label: entry.food.trim(),
+      time: "--:--"
+    }];
+  }
+
+  return [];
 }
 
 function updateAuthUI(isConnected) {
@@ -460,8 +760,49 @@ function formatDate(value) {
   }).format(new Date(value));
 }
 
+function formatGraphDate(value) {
+  const date = new Date(value);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
 function formatHealthHeadline(health) {
   return health.length > 22 ? `${health.slice(0, 22)}...` : health;
+}
+
+function formatNumber(value, digits) {
+  return Number(value).toFixed(digits);
+}
+
+function formatOptional(value, unit, digits) {
+  return Number.isFinite(value) ? `${Number(value).toFixed(digits)} ${unit}` : "--";
+}
+
+function formatCount(value) {
+  return Number.isFinite(value) ? `${value}回` : "--";
+}
+
+function parseOptionalNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseOptionalInteger(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function currentTimeLabel() {
+  return new Intl.DateTimeFormat("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(new Date());
 }
 
 function escapeDriveQuery(text) {
