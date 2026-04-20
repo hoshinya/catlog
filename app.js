@@ -94,6 +94,7 @@ function bootstrap() {
     showToast("編集をキャンセルしました。");
   });
   elements.entriesList.addEventListener("click", handleEntryListClick);
+  elements.entriesList.addEventListener("keydown", handleEntryListKeydown);
   window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
   window.addEventListener("appinstalled", handleAppInstalled);
   window.addEventListener("online", handleConnectivityChange);
@@ -361,13 +362,31 @@ function startEditing(entryId) {
 
 function handleEntryListClick(event) {
   const button = event.target.closest("[data-action]");
-  if (!button) {
+  if (button?.dataset.action === "edit-entry") {
+    startEditing(button.dataset.entryId);
     return;
   }
 
-  if (button.dataset.action === "edit-entry") {
-    startEditing(button.dataset.entryId);
+  const card = event.target.closest("[data-entry-id]");
+  if (!card) {
+    return;
   }
+
+  startEditing(card.dataset.entryId);
+}
+
+function handleEntryListKeydown(event) {
+  if (event.key !== "Enter" && event.key !== " ") {
+    return;
+  }
+
+  const card = event.target.closest("[data-entry-id]");
+  if (!card) {
+    return;
+  }
+
+  event.preventDefault();
+  startEditing(card.dataset.entryId);
 }
 
 async function ensureDriveStructure() {
@@ -563,6 +582,10 @@ function renderEntries() {
   state.entries.forEach((entry) => {
     const article = document.createElement("article");
     article.className = "entry-card";
+    article.dataset.entryId = entry.id;
+    article.tabIndex = 0;
+    article.setAttribute("role", "button");
+    article.setAttribute("aria-label", `${formatDate(entry.date)} の記録を編集`);
     article.innerHTML = `
       <div>
         <p class="entry-meta">${formatDate(entry.date)} / 猫 ${formatNumber(entry.weight, 2)} kg / 飼い主 ${formatOptional(entry.ownerWeight, "kg", 1)}</p>
