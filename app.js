@@ -1,4 +1,9 @@
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const STORAGE_KEYS = {
+  accessToken: "catlog.accessToken",
+  tokenExpiry: "catlog.tokenExpiry",
+  hasAuthorized: "catlog.hasAuthorized"
+};
 
 const config = window.CATLOG_CONFIG || {};
 const state = {
@@ -55,7 +60,17 @@ bootstrap();
 function bootstrap() {
   resetForm();
 
-  elements.connectButton.addEventListener("click", connectGoogleDrive);
+  elements.connectButton.addEventListener("click", async () => {
+    try {
+      await connectGoogleDrive();
+    } catch (error) {
+      console.error(error);
+      clearSavedSession();
+      updateAuthUI(false);
+      setSyncMessage("Google Drive に再接続してください。");
+      showToast("Google Drive の接続に失敗しました。");
+    }
+  });
   elements.reloadButton.addEventListener("click", async () => {
     if (!state.accessToken) {
       showToast("先に Google Drive に接続してください。");
@@ -85,6 +100,7 @@ function bootstrap() {
   window.addEventListener("offline", handleConnectivityChange);
 
   validateConfig();
+  restoreSavedSession();
   registerServiceWorker();
   refreshInstallUI();
   handleConnectivityChange();
@@ -113,7 +129,7 @@ function validateConfig() {
   }
 }
 
-function connectGoogleDrive() {
+async function connectGoogleDrive() {
   if (!navigator.onLine) {
     showToast("オフライン中は Google Drive に接続できません。");
     return;
@@ -137,6 +153,7 @@ function connectGoogleDrive() {
         }
 
         state.accessToken = response.access_token;
+        persistToken(response);
         updateAuthUI(true);
         await ensureDriveStructure();
         await loadEntriesFromDrive();
@@ -144,7 +161,26 @@ function connectGoogleDrive() {
     });
   }
 
-  state.tokenClient.requestAccessToken({ prompt: state.accessToken ? "" : "consent" });
+  if (hasUsableAccessToken()) {
+    updateAuthUI(true);
+    await ensureDriveStructure();
+    await loadEntriesFromDrive();
+    showToast("保存済みの接続情報を使いました。");
+    return;
+  }
+
+  const canTrySilent = localStorage.getItem(STORAGE_KEYS.hasAuthorized) === "true";
+
+  try {
+    await requestAccessToken({ prompt: canTrySilent ? "" : "consent" });
+  } catch (error) {
+    console.warn("Silent token refresh failed, falling back to consent.", error);
+    if (canTrySilent) {
+      await requestAccessToken({ prompt: "consent" });
+    } else {
+      throw error;
+    }
+  }
 }
 
 async function handleSubmit(event) {
@@ -685,6 +721,82 @@ function normalizeFoods(entry) {
 function updateAuthUI(isConnected) {
   elements.authStatus.textContent = isConnected ? "接続済み" : "未接続";
   elements.reloadButton.disabled = !isConnected;
+  elements.connectButton.textContent = isConnected ? "Google Drive を開く" : "Google Drive に接続";
+}
+
+function restoreSavedSession() {
+  const storedToken = localStorage.getItem(STORAGE_KEYS.accessToken);
+  const storedExpiry = Number(localStorage.getItem(STORAGE_KEYS.tokenExpiry) || 0);
+
+  if (!storedToken || !storedExpiry) {
+    return;
+  }
+
+  if (storedExpiry <= Date.now()) {
+    clearSavedSession();
+    return;
+  }
+
+  state.accessToken = storedToken;
+  updateAuthUI(true);
+  setSyncMessage("前回の接続情報を復元しました。");
+
+  if (navigator.onLine) {
+    ensureDriveStructure()
+      .then(loadEntriesFromDrive)
+      .catch((error) => {
+        console.warn("Failed to restore Drive session:", error);
+        clearSavedSession();
+        updateAuthUI(false);
+        setSyncMessage("Google Drive に再接続してください。");
+      });
+  }
+}
+
+function persistToken(response) {
+  if (!response?.access_token || !response?.expires_in) {
+    return;
+  }
+
+  const expiresAt = Date.now() + (Number(response.expires_in) - 60) * 1000;
+  localStorage.setItem(STORAGE_KEYS.accessToken, response.access_token);
+  localStorage.setItem(STORAGE_KEYS.tokenExpiry, String(expiresAt));
+  localStorage.setItem(STORAGE_KEYS.hasAuthorized, "true");
+}
+
+function clearSavedSession() {
+  state.accessToken = null;
+  localStorage.removeItem(STORAGE_KEYS.accessToken);
+  localStorage.removeItem(STORAGE_KEYS.tokenExpiry);
+}
+
+function hasUsableAccessToken() {
+  const expiry = Number(localStorage.getItem(STORAGE_KEYS.tokenExpiry) || 0);
+  return Boolean(state.accessToken) && expiry > Date.now();
+}
+
+function requestAccessToken(overrides) {
+  return new Promise((resolve, reject) => {
+    state.tokenClient.callback = async (response) => {
+      if (response.error) {
+        reject(new Error(response.error));
+        return;
+      }
+
+      try {
+        state.accessToken = response.access_token;
+        persistToken(response);
+        updateAuthUI(true);
+        await ensureDriveStructure();
+        await loadEntriesFromDrive();
+        resolve(response);
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    state.tokenClient.requestAccessToken(overrides);
+  });
 }
 
 async function registerServiceWorker() {
