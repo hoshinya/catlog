@@ -1,4 +1,4 @@
-const CACHE_NAME = "catlog-shell-v1";
+const CACHE_NAME = "catlog-shell-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -44,6 +44,21 @@ self.addEventListener("fetch", (event) => {
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request).catch(() => caches.match("./index.html"))
+    );
+    return;
+  }
+
+  if (APP_SHELL.some((asset) => requestUrl.pathname.endsWith(asset.replace("./", "/")) || requestUrl.pathname.endsWith(asset.replace("./", "")))) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
     );
     return;
   }
