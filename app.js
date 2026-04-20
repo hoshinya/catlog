@@ -586,6 +586,14 @@ function renderEntries() {
     article.tabIndex = 0;
     article.setAttribute("role", "button");
     article.setAttribute("aria-label", `${formatDate(entry.date)} の記録を編集`);
+    article.addEventListener("click", () => startEditing(entry.id));
+    article.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      event.preventDefault();
+      startEditing(entry.id);
+    });
     article.innerHTML = `
       <div>
         <p class="entry-meta">${formatDate(entry.date)} / 猫 ${formatNumber(entry.weight, 2)} kg / 飼い主 ${formatOptional(entry.ownerWeight, "kg", 1)}</p>
@@ -615,6 +623,10 @@ function renderEntries() {
         ${entry.photo?.url ? `<img class="entry-photo" src="${entry.photo.url}" alt="猫の記録写真">` : '<div class="empty-state">写真なし</div>'}
       </div>
     `;
+    article.querySelector('[data-action="edit-entry"]')?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      startEditing(entry.id);
+    });
     elements.entriesList.appendChild(article);
   });
 }
@@ -828,7 +840,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    await navigator.serviceWorker.register("./sw.js");
+    await navigator.serviceWorker.register("./sw.js?v=3", { updateViaCache: "none" });
   } catch (error) {
     console.error("Service worker registration failed:", error);
   }
