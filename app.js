@@ -457,10 +457,10 @@ async function saveEntriesToDrive() {
   const metadata = {
     name: config.entriesFileName || "entries.json",
     mimeType: "application/json",
-    parents: [state.drive.rootFolderId],
     appProperties: {
       [DRIVE_APP_PROPERTY_KEY]: DRIVE_RESOURCE_KINDS.entriesFile
-    }
+    },
+    ...(state.drive.entriesFileId ? {} : { parents: [state.drive.rootFolderId] })
   };
 
   const response = await multipartUpload({
@@ -604,13 +604,16 @@ async function findExistingFile(name, parentId, kind = null, cachedId = null) {
 }
 
 async function multipartUpload({ metadata, contentType, fileBody, fileId = null }) {
+  const safeMetadata = fileId
+    ? Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== "parents"))
+    : metadata;
   const boundary = "catlog-upload-boundary";
   const delimiter = `\r\n--${boundary}\r\n`;
   const closeDelimiter = `\r\n--${boundary}--`;
   const metadataPart = [
     delimiter,
     "Content-Type: application/json; charset=UTF-8\r\n\r\n",
-    JSON.stringify(metadata)
+    JSON.stringify(safeMetadata)
   ].join("");
 
   const fileHeader = [
@@ -1039,7 +1042,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    await navigator.serviceWorker.register("./sw.js?v=11", { updateViaCache: "none" });
+    await navigator.serviceWorker.register("./sw.js?v=12", { updateViaCache: "none" });
   } catch (error) {
     console.error("Service worker registration failed:", error);
   }
