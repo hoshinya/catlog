@@ -36,13 +36,12 @@ const elements = {
   date: document.getElementById("date"),
   weight: document.getElementById("weight"),
   ownerWeight: document.getElementById("owner-weight"),
+  foodTimeInput: document.getElementById("food-time-input"),
   foodInput: document.getElementById("food-input"),
   addFoodButton: document.getElementById("add-food-button"),
   foodList: document.getElementById("food-list"),
   foodListEmpty: document.getElementById("food-list-empty"),
-  waterIntake: document.getElementById("water-intake"),
   health: document.getElementById("health"),
-  peeCount: document.getElementById("pee-count"),
   poopCount: document.getElementById("poop-count"),
   photoInput: document.getElementById("photo"),
   photoPreview: document.getElementById("photo-preview"),
@@ -119,6 +118,7 @@ function resetForm() {
   elements.cancelEditButton.hidden = true;
   state.editingEntryId = null;
   state.draftFoods = [];
+  elements.foodTimeInput.value = currentTimeInputValue();
   renderFoodDraft();
   clearPhotoPreview();
 }
@@ -128,6 +128,20 @@ function validateConfig() {
     setSyncMessage("config.js に Google OAuth Client ID を設定してください。");
     elements.connectButton.disabled = true;
   }
+}
+
+function ensureTokenClient() {
+  if (state.tokenClient || !window.google?.accounts?.oauth2) {
+    return state.tokenClient;
+  }
+
+  state.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: config.googleClientId,
+    scope: DRIVE_SCOPE,
+    callback: () => {}
+  });
+
+  return state.tokenClient;
 }
 
 async function connectGoogleDrive() {
@@ -141,26 +155,7 @@ async function connectGoogleDrive() {
     return;
   }
 
-  if (!state.tokenClient) {
-    state.tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: config.googleClientId,
-      scope: DRIVE_SCOPE,
-      callback: async (response) => {
-        if (response.error) {
-          console.error(response);
-          setSyncMessage("Google Drive への接続に失敗しました。");
-          showToast("Google Drive の接続に失敗しました。");
-          return;
-        }
-
-        state.accessToken = response.access_token;
-        persistToken(response);
-        updateAuthUI(true);
-        await ensureDriveStructure();
-        await loadEntriesFromDrive();
-      }
-    });
-  }
+  ensureTokenClient();
 
   if (hasUsableAccessToken()) {
     updateAuthUI(true);
@@ -173,11 +168,15 @@ async function connectGoogleDrive() {
   const canTrySilent = localStorage.getItem(STORAGE_KEYS.hasAuthorized) === "true";
 
   try {
-    await requestAccessToken({ prompt: canTrySilent ? "" : "consent" });
+    await requestAccessTokenRaw({ prompt: canTrySilent ? "" : "consent" });
+    await ensureDriveStructure();
+    await loadEntriesFromDrive();
   } catch (error) {
     console.warn("Silent token refresh failed, falling back to consent.", error);
     if (canTrySilent) {
-      await requestAccessToken({ prompt: "consent" });
+      await requestAccessTokenRaw({ prompt: "consent" });
+      await ensureDriveStructure();
+      await loadEntriesFromDrive();
     } else {
       throw error;
     }
@@ -210,9 +209,7 @@ async function handleSubmit(event) {
     weight: Number(formData.get("weight")),
     ownerWeight: parseOptionalNumber(formData.get("ownerWeight")),
     foods: state.draftFoods.map((item) => ({ ...item })),
-    waterIntake: parseOptionalNumber(formData.get("waterIntake")),
     health: String(formData.get("health")).trim(),
-    peeCount: parseOptionalInteger(formData.get("peeCount")),
     poopCount: parseOptionalInteger(formData.get("poopCount")),
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -226,7 +223,12 @@ async function handleSubmit(event) {
     setSyncMessage("Google Drive に保存しています...");
 
     if (photoFile) {
-      entry.photo = await uploadPhoto(photoFile, entry.id);
+      try {
+        entry.photo = await uploadPhoto(photoFile, entry.id);
+      } catch (photoError) {
+        console.error(photoError);
+        showToast("写真の保存は失敗しましたが、記録本体は続けて保存します。");
+      }
     }
 
     if (existing) {
@@ -244,8 +246,16 @@ async function handleSubmit(event) {
     showToast(existing ? "記録を更新しました。" : "記録を保存しました。");
   } catch (error) {
     console.error(error);
-    setSyncMessage("保存に失敗しました。設定や権限をご確認ください。");
-    showToast("保存に失敗しました。");
+    if (isAuthError(error)) {
+      clearSavedSession();
+      updateAuthUI(false);
+      setSyncMessage("Google Drive の認証が切れました。再接続してください。");
+      showToast("認証が切れました。Google Drive に再接続してください。");
+    } else {
+      const errorMessage = describeDriveError(error);
+      setSyncMessage(errorMessage);
+      showToast(errorMessage);
+    }
   } finally {
     elements.saveButton.disabled = false;
   }
@@ -260,9 +270,10 @@ function addFoodItemFromInput() {
   state.draftFoods.push({
     id: crypto.randomUUID(),
     label: text,
-    time: currentTimeLabel()
+    time: elements.foodTimeInput.value || currentTimeInputValue()
   });
   elements.foodInput.value = "";
+  elements.foodTimeInput.value = currentTimeInputValue();
   renderFoodDraft();
 }
 
@@ -342,11 +353,10 @@ function startEditing(entryId) {
   elements.date.value = entry.date;
   elements.weight.value = entry.weight ?? "";
   elements.ownerWeight.value = entry.ownerWeight ?? "";
-  elements.waterIntake.value = entry.waterIntake ?? "";
   elements.health.value = entry.health ?? "";
-  elements.peeCount.value = entry.peeCount ?? "";
   elements.poopCount.value = entry.poopCount ?? "";
   state.draftFoods = entry.foods.map((item) => ({ ...item }));
+  elements.foodTimeInput.value = currentTimeInputValue();
   renderFoodDraft();
 
   if (entry.photo?.url) {
@@ -569,7 +579,19 @@ async function driveFetch(url, options = {}) {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(detail || `Drive request failed: ${response.status}`);
+    if (response.status === 401 && !options._retried) {
+      const refreshed = await trySilentRefresh();
+      if (refreshed) {
+        return driveFetch(url, {
+          ...options,
+          _retried: true
+        });
+      }
+    }
+
+    const error = new Error(detail || `Drive request failed: ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
 
   return response;
@@ -600,12 +622,8 @@ function renderEntries() {
         <h3>${escapeHtml(formatHealthHeadline(entry.health))}</h3>
         <div class="entry-stats">
           <div class="stat-tile">
-            <span>給水量</span>
-            <strong>${formatOptional(entry.waterIntake, "ml", 0)}</strong>
-          </div>
-          <div class="stat-tile">
-            <span>排泄</span>
-            <strong>尿 ${formatCount(entry.peeCount)} / 便 ${formatCount(entry.poopCount)}</strong>
+            <span>うんち</span>
+            <strong>${formatCount(entry.poopCount)}</strong>
           </div>
         </div>
         <p><strong>健康状態:</strong> ${escapeHtml(entry.health)}</p>
@@ -723,9 +741,7 @@ function normalizeEntry(entry) {
     weight: Number(entry.weight || 0),
     ownerWeight: parseOptionalNumber(entry.ownerWeight),
     foods,
-    waterIntake: parseOptionalInteger(entry.waterIntake),
     health: String(entry.health || "").trim(),
-    peeCount: parseOptionalInteger(entry.peeCount),
     poopCount: parseOptionalInteger(entry.poopCount),
     createdAt: entry.createdAt || new Date().toISOString(),
     updatedAt: entry.updatedAt || entry.createdAt || new Date().toISOString(),
@@ -810,8 +826,14 @@ function hasUsableAccessToken() {
   return Boolean(state.accessToken) && expiry > Date.now();
 }
 
-function requestAccessToken(overrides) {
+function requestAccessTokenRaw(overrides) {
   return new Promise((resolve, reject) => {
+    ensureTokenClient();
+    if (!state.tokenClient) {
+      reject(new Error("Google token client is not ready"));
+      return;
+    }
+
     state.tokenClient.callback = async (response) => {
       if (response.error) {
         reject(new Error(response.error));
@@ -822,8 +844,6 @@ function requestAccessToken(overrides) {
         state.accessToken = response.access_token;
         persistToken(response);
         updateAuthUI(true);
-        await ensureDriveStructure();
-        await loadEntriesFromDrive();
         resolve(response);
       } catch (error) {
         reject(error);
@@ -834,13 +854,54 @@ function requestAccessToken(overrides) {
   });
 }
 
+async function trySilentRefresh() {
+  if (!navigator.onLine || localStorage.getItem(STORAGE_KEYS.hasAuthorized) !== "true") {
+    return false;
+  }
+
+  try {
+    await requestAccessTokenRaw({ prompt: "" });
+    return true;
+  } catch (error) {
+    console.warn("Silent refresh failed:", error);
+    return false;
+  }
+}
+
+function isAuthError(error) {
+  return error?.status === 401 || String(error?.message || "").includes("invalid_grant");
+}
+
+function describeDriveError(error) {
+  const message = String(error?.message || "");
+  const apiMessage = extractApiMessage(message);
+
+  if (error?.status === 403) {
+    return "Google Drive への書き込み権限が足りません。接続し直してお試しください。";
+  }
+
+  if (message.includes("storageQuotaExceeded") || apiMessage.includes("storageQuotaExceeded")) {
+    return "Google Drive の空き容量が不足しています。";
+  }
+
+  if (message.includes("File not found") || apiMessage.includes("File not found")) {
+    return "保存先フォルダが見つかりませんでした。再接続してもう一度お試しください。";
+  }
+
+  if (apiMessage) {
+    return `保存に失敗しました: ${apiMessage}`;
+  }
+
+  return "保存に失敗しました。設定や権限をご確認ください。";
+}
+
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) {
     return;
   }
 
   try {
-    await navigator.serviceWorker.register("./sw.js?v=3", { updateViaCache: "none" });
+    await navigator.serviceWorker.register("./sw.js?v=5", { updateViaCache: "none" });
   } catch (error) {
     console.error("Service worker registration failed:", error);
   }
@@ -950,6 +1011,23 @@ function currentTimeLabel() {
     minute: "2-digit",
     hour12: false
   }).format(new Date());
+}
+
+function currentTimeInputValue() {
+  return new Intl.DateTimeFormat("sv-SE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(new Date());
+}
+
+function extractApiMessage(message) {
+  try {
+    const parsed = JSON.parse(message);
+    return parsed?.error?.message || "";
+  } catch {
+    return "";
+  }
 }
 
 function escapeDriveQuery(text) {
