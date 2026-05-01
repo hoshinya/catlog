@@ -221,7 +221,6 @@ async function handleSubmit(event) {
   try {
     elements.saveButton.disabled = true;
     setSyncMessage("Google Drive に保存しています...");
-    await ensureDriveStructure();
 
     if (photoFile) {
       try {
@@ -592,7 +591,6 @@ async function driveFetch(url, options = {}) {
 
     const error = new Error(detail || `Drive request failed: ${response.status}`);
     error.status = response.status;
-    error.detail = detail || "";
     throw error;
   }
 
@@ -877,7 +875,6 @@ function isAuthError(error) {
 function describeDriveError(error) {
   const message = String(error?.message || "");
   const apiMessage = extractApiMessage(message);
-  const status = error?.status ? ` (HTTP ${error.status})` : "";
 
   if (error?.status === 403) {
     return "Google Drive への書き込み権限が足りません。接続し直してお試しください。";
@@ -892,15 +889,10 @@ function describeDriveError(error) {
   }
 
   if (apiMessage) {
-    return `保存に失敗しました${status}: ${apiMessage}`;
+    return `保存に失敗しました: ${apiMessage}`;
   }
 
-  const rawDetail = String(error?.detail || message || "").replace(/\s+/g, " ").trim();
-  if (rawDetail) {
-    return `保存に失敗しました${status}: ${rawDetail.slice(0, 140)}`;
-  }
-
-  return `保存に失敗しました${status}。設定や権限をご確認ください。`;
+  return "保存に失敗しました。設定や権限をご確認ください。";
 }
 
 async function registerServiceWorker() {
@@ -909,7 +901,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    await navigator.serviceWorker.register("./sw.js?v=6", { updateViaCache: "none" });
+    await navigator.serviceWorker.register("./sw.js?v=5", { updateViaCache: "none" });
   } catch (error) {
     console.error("Service worker registration failed:", error);
   }
