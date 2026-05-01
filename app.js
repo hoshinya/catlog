@@ -2,7 +2,16 @@ const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const STORAGE_KEYS = {
   accessToken: "catlog.accessToken",
   tokenExpiry: "catlog.tokenExpiry",
-  hasAuthorized: "catlog.hasAuthorized"
+  hasAuthorized: "catlog.hasAuthorized",
+  rootFolderId: "catlog.rootFolderId",
+  photosFolderId: "catlog.photosFolderId",
+  entriesFileId: "catlog.entriesFileId"
+};
+const DRIVE_APP_PROPERTY_KEY = "catlogKind";
+const DRIVE_RESOURCE_KINDS = {
+  rootFolder: "root-folder",
+  photosFolder: "photos-folder",
+  entriesFile: "entries-file"
 };
 
 const config = window.CATLOG_CONFIG || {};
@@ -101,6 +110,7 @@ function bootstrap() {
   window.addEventListener("offline", handleConnectivityChange);
 
   validateConfig();
+  restoreDriveState();
   restoreSavedSession();
   registerServiceWorker();
   refreshInstallUI();
@@ -224,6 +234,7 @@ async function handleSubmit(event) {
   try {
     elements.saveButton.disabled = true;
     setSyncMessage("Google Drive に保存しています...");
+    await ensureDriveStructure();
 
     if (photoFile) {
       entry.photo = await uploadPhoto(photoFile, entry.id);
@@ -393,12 +404,25 @@ async function ensureDriveStructure() {
   const rootFolderName = config.driveRootFolderName || "Catlog";
   const photosFolderName = config.photosFolderName || "photos";
 
-  state.drive.rootFolderId = await findOrCreateFolder(rootFolderName);
-  state.drive.photosFolderId = await findOrCreateFolder(photosFolderName, state.drive.rootFolderId);
-  state.drive.entriesFileId = await findExistingFile(
-    config.entriesFileName || "entries.json",
+  state.drive.rootFolderId = await findOrCreateFolder(
+    rootFolderName,
+    null,
+    DRIVE_RESOURCE_KINDS.rootFolder,
     state.drive.rootFolderId
   );
+  state.drive.photosFolderId = await findOrCreateFolder(
+    photosFolderName,
+    state.drive.rootFolderId,
+    DRIVE_RESOURCE_KINDS.photosFolder,
+    state.drive.photosFolderId
+  );
+  state.drive.entriesFileId = await findExistingFile(
+    config.entriesFileName || "entries.json",
+    state.drive.rootFolderId,
+    DRIVE_RESOURCE_KINDS.entriesFile,
+    state.drive.entriesFileId
+  );
+  persistDriveState();
 }
 
 async function loadEntriesFromDrive() {
@@ -432,7 +456,10 @@ async function saveEntriesToDrive() {
   const metadata = {
     name: config.entriesFileName || "entries.json",
     mimeType: "application/json",
-    parents: [state.drive.rootFolderId]
+    parents: [state.drive.rootFolderId],
+    appProperties: {
+      [DRIVE_APP_PROPERTY_KEY]: DRIVE_RESOURCE_KINDS.entriesFile
+    }
   };
 
   const response = await multipartUpload({
@@ -443,6 +470,7 @@ async function saveEntriesToDrive() {
   });
 
   state.drive.entriesFileId = response.id;
+  persistDriveState();
 }
 
 async function uploadPhoto(file, entryId) {
@@ -473,8 +501,8 @@ async function uploadPhoto(file, entryId) {
   };
 }
 
-async function findOrCreateFolder(name, parentId = null) {
-  const existing = await findFolder(name, parentId);
+async function findOrCreateFolder(name, parentId = null, kind = null, cachedId = null) {
+  const existing = await findFolder(name, parentId, kind, cachedId);
   if (existing) {
     return existing.id;
   }
@@ -482,7 +510,8 @@ async function findOrCreateFolder(name, parentId = null) {
   const metadata = {
     name,
     mimeType: "application/vnd.google-apps.folder",
-    ...(parentId ? { parents: [parentId] } : {})
+    ...(parentId ? { parents: [parentId] } : {}),
+    ...(kind ? { appProperties: { [DRIVE_APP_PROPERTY_KEY]: kind } } : {})
   };
 
   const response = await driveFetch("https://www.googleapis.com/drive/v3/files", {
@@ -495,7 +524,29 @@ async function findOrCreateFolder(name, parentId = null) {
   return created.id;
 }
 
-async function findFolder(name, parentId = null) {
+async function findFolder(name, parentId = null, kind = null, cachedId = null) {
+  const cached = await getAccessibleDriveFile(cachedId);
+  if (cached?.mimeType === "application/vnd.google-apps.folder" && matchesParent(cached, parentId)) {
+    if (kind && cached.appProperties?.[DRIVE_APP_PROPERTY_KEY] !== kind) {
+      const tagged = await tagManagedResource(cached.id, kind);
+      if (!tagged) {
+        return null;
+      }
+    }
+    return cached;
+  }
+
+  if (kind) {
+    const tagged = await searchDriveFile(buildManagedQuery({
+      kind,
+      parentId,
+      mimeType: "application/vnd.google-apps.folder"
+    }));
+    if (tagged) {
+      return tagged;
+    }
+  }
+
   const queryParts = [
     `name = '${escapeDriveQuery(name)}'`,
     "mimeType = 'application/vnd.google-apps.folder'",
@@ -506,26 +557,49 @@ async function findFolder(name, parentId = null) {
     queryParts.push(`'${parentId}' in parents`);
   }
 
-  const response = await driveFetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(queryParts.join(" and "))}&fields=files(id,name)&pageSize=1`
-  );
-
-  const data = await response.json();
-  return data.files?.[0] || null;
+  const fallback = await searchDriveFile(queryParts.join(" and "));
+  if (fallback && kind) {
+    const tagged = await tagManagedResource(fallback.id, kind);
+    if (!tagged) {
+      return null;
+    }
+  }
+  return fallback;
 }
 
-async function findExistingFile(name, parentId) {
+async function findExistingFile(name, parentId, kind = null, cachedId = null) {
+  const cached = await getAccessibleDriveFile(cachedId);
+  if (cached && matchesParent(cached, parentId)) {
+    if (kind && cached.appProperties?.[DRIVE_APP_PROPERTY_KEY] !== kind) {
+      const tagged = await tagManagedResource(cached.id, kind);
+      if (!tagged) {
+        return null;
+      }
+    }
+    return cached.id;
+  }
+
+  if (kind) {
+    const tagged = await searchDriveFile(buildManagedQuery({ kind, parentId }));
+    if (tagged) {
+      return tagged.id;
+    }
+  }
+
   const query = [
     `name = '${escapeDriveQuery(name)}'`,
     `'${parentId}' in parents`,
     "trashed = false"
   ].join(" and ");
 
-  const response = await driveFetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1`
-  );
-  const data = await response.json();
-  return data.files?.[0]?.id || null;
+  const fallback = await searchDriveFile(query);
+  if (fallback && kind) {
+    const tagged = await tagManagedResource(fallback.id, kind);
+    if (!tagged) {
+      return null;
+    }
+  }
+  return fallback?.id || null;
 }
 
 async function multipartUpload({ metadata, contentType, fileBody, fileId = null }) {
@@ -573,6 +647,71 @@ async function driveFetch(url, options = {}) {
   }
 
   return response;
+}
+
+async function getAccessibleDriveFile(fileId) {
+  if (!fileId) {
+    return null;
+  }
+
+  try {
+    const response = await driveFetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,parents,appProperties`
+    );
+    return response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function searchDriveFile(query) {
+  const response = await driveFetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,parents,appProperties)&pageSize=10`
+  );
+  const data = await response.json();
+  return data.files?.[0] || null;
+}
+
+function buildManagedQuery({ kind, parentId = null, mimeType = null }) {
+  const queryParts = [
+    "trashed = false",
+    `appProperties has { key='${DRIVE_APP_PROPERTY_KEY}' and value='${escapeDriveQuery(kind)}' }`
+  ];
+
+  if (mimeType) {
+    queryParts.push(`mimeType = '${escapeDriveQuery(mimeType)}'`);
+  }
+
+  if (parentId) {
+    queryParts.push(`'${parentId}' in parents`);
+  }
+
+  return queryParts.join(" and ");
+}
+
+async function tagManagedResource(fileId, kind) {
+  try {
+    await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        appProperties: {
+          [DRIVE_APP_PROPERTY_KEY]: kind
+        }
+      })
+    });
+    return true;
+  } catch (error) {
+    console.warn("Unable to tag Drive resource for Catlog:", error);
+    return false;
+  }
+}
+
+function matchesParent(file, parentId) {
+  if (!parentId) {
+    return true;
+  }
+  return Array.isArray(file.parents) && file.parents.includes(parentId);
 }
 
 function renderEntries() {
@@ -788,6 +927,35 @@ function restoreSavedSession() {
   }
 }
 
+function restoreDriveState() {
+  state.drive.rootFolderId = localStorage.getItem(STORAGE_KEYS.rootFolderId) || null;
+  state.drive.photosFolderId = localStorage.getItem(STORAGE_KEYS.photosFolderId) || null;
+  state.drive.entriesFileId = localStorage.getItem(STORAGE_KEYS.entriesFileId) || null;
+}
+
+function persistDriveState() {
+  setStoredValue(STORAGE_KEYS.rootFolderId, state.drive.rootFolderId);
+  setStoredValue(STORAGE_KEYS.photosFolderId, state.drive.photosFolderId);
+  setStoredValue(STORAGE_KEYS.entriesFileId, state.drive.entriesFileId);
+}
+
+function clearDriveState() {
+  state.drive.rootFolderId = null;
+  state.drive.photosFolderId = null;
+  state.drive.entriesFileId = null;
+  localStorage.removeItem(STORAGE_KEYS.rootFolderId);
+  localStorage.removeItem(STORAGE_KEYS.photosFolderId);
+  localStorage.removeItem(STORAGE_KEYS.entriesFileId);
+}
+
+function setStoredValue(key, value) {
+  if (value) {
+    localStorage.setItem(key, value);
+    return;
+  }
+  localStorage.removeItem(key);
+}
+
 function persistToken(response) {
   if (!response?.access_token || !response?.expires_in) {
     return;
@@ -803,6 +971,7 @@ function clearSavedSession() {
   state.accessToken = null;
   localStorage.removeItem(STORAGE_KEYS.accessToken);
   localStorage.removeItem(STORAGE_KEYS.tokenExpiry);
+  clearDriveState();
 }
 
 function hasUsableAccessToken() {
@@ -840,7 +1009,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    await navigator.serviceWorker.register("./sw.js?v=3", { updateViaCache: "none" });
+    await navigator.serviceWorker.register("./sw.js?v=10", { updateViaCache: "none" });
   } catch (error) {
     console.error("Service worker registration failed:", error);
   }
