@@ -211,6 +211,16 @@ h2 {
   border: 1px solid var(--line);
 }
 
+.button--danger {
+  background: rgba(139, 44, 44, 0.1);
+  color: #8b2c2c;
+  border: 1px solid rgba(139, 44, 44, 0.18);
+}
+
+.button--danger:hover {
+  background: rgba(139, 44, 44, 0.16);
+}
+
 .button--wide {
   width: 100%;
 }

@@ -372,10 +372,52 @@ function startEditing(entryId) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+async function deleteEntry(entryId) {
+  const entry = state.entries.find((item) => item.id === entryId);
+  if (!entry) {
+    return;
+  }
+
+  const confirmed = window.confirm(`${formatDate(entry.date)} の記録を削除しますか？`);
+  if (!confirmed) {
+    return;
+  }
+
+  if (!state.accessToken) {
+    showToast("削除するには Google Drive に接続してください。");
+    return;
+  }
+
+  try {
+    setSyncMessage("記録を削除しています...");
+    state.entries = state.entries.filter((item) => item.id !== entryId);
+    await saveEntriesToDrive();
+    renderEntries();
+    renderGraph();
+
+    if (state.editingEntryId === entryId) {
+      resetForm();
+    }
+
+    setSyncMessage("Google Drive と同期済みです。");
+    showToast("記録を削除しました。");
+  } catch (error) {
+    console.error(error);
+    const errorMessage = describeDriveError(error);
+    setSyncMessage(errorMessage);
+    showToast(errorMessage);
+  }
+}
+
 function handleEntryListClick(event) {
   const button = event.target.closest("[data-action]");
   if (button?.dataset.action === "edit-entry") {
     startEditing(button.dataset.entryId);
+    return;
+  }
+
+  if (button?.dataset.action === "delete-entry") {
+    deleteEntry(button.dataset.entryId);
     return;
   }
 
@@ -789,6 +831,7 @@ function renderEntries() {
         </div>
         <div class="entry-actions">
           <button class="button button--ghost" type="button" data-action="edit-entry" data-entry-id="${entry.id}">編集</button>
+          <button class="button button--danger" type="button" data-action="delete-entry" data-entry-id="${entry.id}">削除</button>
         </div>
       </div>
       <div>
@@ -798,6 +841,10 @@ function renderEntries() {
     article.querySelector('[data-action="edit-entry"]')?.addEventListener("click", (event) => {
       event.stopPropagation();
       startEditing(entry.id);
+    });
+    article.querySelector('[data-action="delete-entry"]')?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteEntry(entry.id);
     });
     elements.entriesList.appendChild(article);
   });
@@ -1042,7 +1089,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    await navigator.serviceWorker.register("./sw.js?v=12", { updateViaCache: "none" });
+    await navigator.serviceWorker.register("./sw.js?v=13", { updateViaCache: "none" });
   } catch (error) {
     console.error("Service worker registration failed:", error);
   }
