@@ -49,9 +49,7 @@ const elements = {
   addFoodButton: document.getElementById("add-food-button"),
   foodList: document.getElementById("food-list"),
   foodListEmpty: document.getElementById("food-list-empty"),
-  waterIntake: document.getElementById("water-intake"),
   health: document.getElementById("health"),
-  peeCount: document.getElementById("pee-count"),
   poopCount: document.getElementById("poop-count"),
   photoInput: document.getElementById("photo"),
   photoPreview: document.getElementById("photo-preview"),
@@ -231,9 +229,7 @@ async function handleSubmit(event) {
     weight: Number(formData.get("weight")),
     ownerWeight: parseOptionalNumber(formData.get("ownerWeight")),
     foods: state.draftFoods.map((item) => ({ ...item })),
-    waterIntake: parseOptionalNumber(formData.get("waterIntake")),
     health: String(formData.get("health")).trim(),
-    peeCount: parseOptionalInteger(formData.get("peeCount")),
     poopCount: parseOptionalInteger(formData.get("poopCount")),
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -391,9 +387,7 @@ function startEditing(entryId) {
   elements.date.value = entry.date;
   elements.weight.value = entry.weight ?? "";
   elements.ownerWeight.value = entry.ownerWeight ?? "";
-  elements.waterIntake.value = entry.waterIntake ?? "";
   elements.health.value = entry.health ?? "";
-  elements.peeCount.value = entry.peeCount ?? "";
   elements.poopCount.value = entry.poopCount ?? "";
   state.draftFoods = entry.foods.map((item) => ({ ...item }));
   renderFoodDraft();
@@ -918,12 +912,8 @@ function renderEntries() {
         <h3>${escapeHtml(formatHealthHeadline(entry.health))}</h3>
         <div class="entry-stats">
           <div class="stat-tile">
-            <span>給水量</span>
-            <strong>${formatOptional(entry.waterIntake, "ml", 0)}</strong>
-          </div>
-          <div class="stat-tile">
-            <span>排泄</span>
-            <strong>尿 ${formatCount(entry.peeCount)} / 便 ${formatCount(entry.poopCount)}</strong>
+            <span>うんち回数</span>
+            <strong>${formatCount(entry.poopCount)}</strong>
           </div>
         </div>
         <p><strong>健康状態:</strong> ${escapeHtml(entry.health)}</p>
@@ -1101,9 +1091,7 @@ function normalizeEntry(entry) {
     weight: Number(entry.weight || 0),
     ownerWeight: parseOptionalNumber(entry.ownerWeight),
     foods,
-    waterIntake: parseOptionalInteger(entry.waterIntake),
     health: String(entry.health || "").trim(),
-    peeCount: parseOptionalInteger(entry.peeCount),
     poopCount: parseOptionalInteger(entry.poopCount),
     createdAt: entry.createdAt || new Date().toISOString(),
     updatedAt: entry.updatedAt || entry.createdAt || new Date().toISOString(),
