@@ -63,7 +63,7 @@ function bootstrap() {
 
   elements.connectButton.addEventListener("click", async () => {
     try {
-      await connectGoogleDrive();
+      await connectGoogleDrive({ forcePrompt: true });
     } catch (error) {
       console.error(error);
       clearSavedSession();
@@ -146,7 +146,9 @@ function ensureTokenClient() {
   return state.tokenClient;
 }
 
-async function connectGoogleDrive() {
+async function connectGoogleDrive(options = {}) {
+  const { forcePrompt = false } = options;
+
   if (!navigator.onLine) {
     showToast("オフライン中は Google Drive に接続できません。");
     return;
@@ -159,7 +161,7 @@ async function connectGoogleDrive() {
 
   ensureTokenClient();
 
-  if (hasUsableAccessToken()) {
+  if (!forcePrompt && hasUsableAccessToken()) {
     updateAuthUI(true);
     await ensureDriveStructure();
     await loadEntriesFromDrive();
@@ -167,10 +169,15 @@ async function connectGoogleDrive() {
     return;
   }
 
-  const canTrySilent = localStorage.getItem(STORAGE_KEYS.hasAuthorized) === "true";
+  const canTrySilent = !forcePrompt && localStorage.getItem(STORAGE_KEYS.hasAuthorized) === "true";
 
   try {
-    await requestAccessTokenRaw({ prompt: canTrySilent ? "" : "consent" });
+    if (forcePrompt) {
+      clearSavedSession();
+      await requestAccessTokenRaw({ prompt: "consent" });
+    } else {
+      await requestAccessTokenRaw({ prompt: canTrySilent ? "" : "consent" });
+    }
     await ensureDriveStructure();
     await loadEntriesFromDrive();
   } catch (error) {
@@ -920,7 +927,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    await navigator.serviceWorker.register("./sw.js?v=7", { updateViaCache: "none" });
+    await navigator.serviceWorker.register("./sw.js?v=8", { updateViaCache: "none" });
   } catch (error) {
     console.error("Service worker registration failed:", error);
   }
