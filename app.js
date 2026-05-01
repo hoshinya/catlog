@@ -23,6 +23,7 @@ const state = {
   installPrompt: null,
   editingEntryId: null,
   draftFoods: [],
+  pendingPhotoFile: null,
   drive: {
     rootFolderId: null,
     photosFolderId: null,
@@ -100,6 +101,7 @@ function bootstrap() {
   elements.foodList.addEventListener("click", handleFoodListClick);
   elements.photoInput.addEventListener("change", handlePhotoPreview);
   elements.removePhotoCheckbox?.addEventListener("change", handleRemovePhotoToggle);
+  document.addEventListener("paste", handleClipboardPaste);
   elements.entryForm.addEventListener("submit", handleSubmit);
   elements.cancelEditButton.addEventListener("click", () => {
     resetForm();
@@ -132,6 +134,7 @@ function resetForm() {
   elements.cancelEditButton.hidden = true;
   state.editingEntryId = null;
   state.draftFoods = [];
+  state.pendingPhotoFile = null;
   if (elements.removePhotoCheckbox) {
     elements.removePhotoCheckbox.checked = false;
   }
@@ -236,7 +239,7 @@ async function handleSubmit(event) {
     photo: existing?.photo || null
   };
 
-  const photoFile = elements.photoInput.files[0];
+  const photoFile = state.pendingPhotoFile || elements.photoInput.files[0] || null;
   const wantsRemovePhoto = Boolean(elements.removePhotoCheckbox?.checked);
   const previousPhoto = existing?.photo || null;
 
@@ -327,6 +330,11 @@ function handleFoodListClick(event) {
 function handlePhotoPreview(event) {
   const file = event.target.files[0];
   if (!file) {
+    if (state.pendingPhotoFile) {
+      // change event was fired from a paste handler that already
+      // set the file — keep the existing pending file and preview.
+      return;
+    }
     clearPhotoPreview();
     if (state.editingEntryId) {
       const editingEntry = state.entries.find((entry) => entry.id === state.editingEntryId);
@@ -337,6 +345,8 @@ function handlePhotoPreview(event) {
     return;
   }
 
+  state.pendingPhotoFile = file;
+
   if (state.previewUrl) {
     URL.revokeObjectURL(state.previewUrl);
   }
@@ -345,6 +355,80 @@ function handlePhotoPreview(event) {
   state.previewUrl = objectUrl;
   elements.previewImage.src = objectUrl;
   elements.photoPreview.hidden = false;
+}
+
+function handleClipboardPaste(event) {
+  const target = event.target;
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    if (target !== elements.photoInput) {
+      return;
+    }
+  }
+
+  const items = event.clipboardData?.items;
+  if (!items || items.length === 0) {
+    return;
+  }
+
+  let pastedFile = null;
+  for (const item of items) {
+    if (item.kind === "file" && item.type.startsWith("image/")) {
+      pastedFile = item.getAsFile();
+      if (pastedFile) {
+        break;
+      }
+    }
+  }
+
+  if (!pastedFile) {
+    return;
+  }
+
+  event.preventDefault();
+  assignPastedImageToInput(pastedFile);
+  showToast("クリップボードの画像を取り込みました。");
+}
+
+function assignPastedImageToInput(file) {
+  const inferredExt = guessImageExtension(file);
+  const fallbackName = `pasted-${Date.now()}${inferredExt}`;
+  const namedFile = file.name
+    ? file
+    : new File([file], fallbackName, { type: file.type || "image/png" });
+
+  state.pendingPhotoFile = namedFile;
+
+  try {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(namedFile);
+    elements.photoInput.files = dataTransfer.files;
+  } catch (error) {
+    console.warn("DataTransfer not supported, falling back to preview-only:", error);
+  }
+
+  if (elements.removePhotoCheckbox) {
+    elements.removePhotoCheckbox.checked = false;
+  }
+
+  // Render preview directly so it works even when the file input
+  // could not actually be populated.
+  if (state.previewUrl) {
+    URL.revokeObjectURL(state.previewUrl);
+  }
+  const objectUrl = URL.createObjectURL(namedFile);
+  state.previewUrl = objectUrl;
+  elements.previewImage.src = objectUrl;
+  elements.photoPreview.hidden = false;
+}
+
+function guessImageExtension(file) {
+  const type = file.type || "";
+  if (type === "image/png") return ".png";
+  if (type === "image/jpeg") return ".jpg";
+  if (type === "image/gif") return ".gif";
+  if (type === "image/webp") return ".webp";
+  if (type === "image/heic") return ".heic";
+  return "";
 }
 
 function handleRemovePhotoToggle() {
@@ -368,6 +452,7 @@ function clearPhotoPreview() {
     URL.revokeObjectURL(state.previewUrl);
     state.previewUrl = null;
   }
+  state.pendingPhotoFile = null;
   elements.previewImage.removeAttribute("src");
   elements.photoPreview.hidden = true;
 }
