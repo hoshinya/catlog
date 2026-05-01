@@ -173,8 +173,9 @@ async function connectGoogleDrive(options = {}) {
 
   try {
     if (forcePrompt) {
+      await revokeDriveConsent();
       clearSavedSession();
-      await requestAccessTokenRaw({ prompt: "consent" });
+      await requestAccessTokenRaw({ prompt: "consent select_account" });
     } else {
       await requestAccessTokenRaw({ prompt: canTrySilent ? "" : "consent" });
     }
@@ -841,6 +842,22 @@ function clearSavedSession() {
   localStorage.removeItem(STORAGE_KEYS.tokenExpiry);
 }
 
+function revokeDriveConsent() {
+  return new Promise((resolve) => {
+    const tokenForRevoke = state.accessToken || localStorage.getItem(STORAGE_KEYS.accessToken);
+
+    if (!tokenForRevoke || !window.google?.accounts?.oauth2?.revoke) {
+      resolve();
+      return;
+    }
+
+    google.accounts.oauth2.revoke(tokenForRevoke, (response) => {
+      console.info("Drive consent revoke response:", response);
+      resolve();
+    });
+  });
+}
+
 function hasUsableAccessToken() {
   const expiry = Number(localStorage.getItem(STORAGE_KEYS.tokenExpiry) || 0);
   return Boolean(state.accessToken) && expiry > Date.now();
@@ -927,7 +944,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    await navigator.serviceWorker.register("./sw.js?v=8", { updateViaCache: "none" });
+    await navigator.serviceWorker.register("./sw.js?v=9", { updateViaCache: "none" });
   } catch (error) {
     console.error("Service worker registration failed:", error);
   }
