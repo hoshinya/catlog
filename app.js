@@ -56,6 +56,8 @@ const elements = {
   photoInput: document.getElementById("photo"),
   photoPreview: document.getElementById("photo-preview"),
   previewImage: document.getElementById("preview-image"),
+  removePhotoField: document.getElementById("photo-remove-field"),
+  removePhotoCheckbox: document.getElementById("remove-photo"),
   entriesList: document.getElementById("entries-list"),
   entriesEmpty: document.getElementById("entries-empty"),
   graphArea: document.getElementById("graph-area"),
@@ -63,6 +65,8 @@ const elements = {
   weightGraph: document.getElementById("weight-graph"),
   toast: document.getElementById("toast")
 };
+
+const photoBlobCache = new Map();
 
 bootstrap();
 
@@ -97,6 +101,7 @@ function bootstrap() {
   });
   elements.foodList.addEventListener("click", handleFoodListClick);
   elements.photoInput.addEventListener("change", handlePhotoPreview);
+  elements.removePhotoCheckbox?.addEventListener("change", handleRemovePhotoToggle);
   elements.entryForm.addEventListener("submit", handleSubmit);
   elements.cancelEditButton.addEventListener("click", () => {
     resetForm();
@@ -129,6 +134,12 @@ function resetForm() {
   elements.cancelEditButton.hidden = true;
   state.editingEntryId = null;
   state.draftFoods = [];
+  if (elements.removePhotoCheckbox) {
+    elements.removePhotoCheckbox.checked = false;
+  }
+  if (elements.removePhotoField) {
+    elements.removePhotoField.hidden = true;
+  }
   renderFoodDraft();
   clearPhotoPreview();
 }
@@ -230,6 +241,8 @@ async function handleSubmit(event) {
   };
 
   const photoFile = elements.photoInput.files[0];
+  const wantsRemovePhoto = Boolean(elements.removePhotoCheckbox?.checked);
+  const previousPhoto = existing?.photo || null;
 
   try {
     elements.saveButton.disabled = true;
@@ -238,6 +251,8 @@ async function handleSubmit(event) {
 
     if (photoFile) {
       entry.photo = await uploadPhoto(photoFile, entry.id);
+    } else if (wantsRemovePhoto) {
+      entry.photo = null;
     }
 
     if (existing) {
@@ -248,6 +263,14 @@ async function handleSubmit(event) {
 
     state.entries = state.entries.map(normalizeEntry).sort(sortEntries);
     await saveEntriesToDrive();
+
+    const previousFileId = previousPhoto?.fileId || null;
+    const currentFileId = entry.photo?.fileId || null;
+    if (previousFileId && previousFileId !== currentFileId) {
+      deleteDriveFile(previousFileId);
+      revokePhotoBlob(previousFileId);
+    }
+
     renderEntries();
     renderGraph();
     resetForm();
@@ -308,15 +331,13 @@ function handleFoodListClick(event) {
 function handlePhotoPreview(event) {
   const file = event.target.files[0];
   if (!file) {
+    clearPhotoPreview();
     if (state.editingEntryId) {
       const editingEntry = state.entries.find((entry) => entry.id === state.editingEntryId);
-      if (editingEntry?.photo?.url) {
-        elements.previewImage.src = editingEntry.photo.url;
-        elements.photoPreview.hidden = false;
-        return;
+      if (editingEntry?.photo?.fileId && !elements.removePhotoCheckbox?.checked) {
+        showEditingPhoto(editingEntry.photo);
       }
     }
-    clearPhotoPreview();
     return;
   }
 
@@ -328,6 +349,22 @@ function handlePhotoPreview(event) {
   state.previewUrl = objectUrl;
   elements.previewImage.src = objectUrl;
   elements.photoPreview.hidden = false;
+}
+
+function handleRemovePhotoToggle() {
+  if (!state.editingEntryId) {
+    return;
+  }
+  const editingEntry = state.entries.find((item) => item.id === state.editingEntryId);
+  if (!editingEntry?.photo?.fileId) {
+    return;
+  }
+  if (elements.removePhotoCheckbox?.checked) {
+    elements.photoInput.value = "";
+    clearPhotoPreview();
+  } else if (!elements.photoInput.files[0]) {
+    showEditingPhoto(editingEntry.photo);
+  }
 }
 
 function clearPhotoPreview() {
@@ -361,15 +398,37 @@ function startEditing(entryId) {
   state.draftFoods = entry.foods.map((item) => ({ ...item }));
   renderFoodDraft();
 
-  if (entry.photo?.url) {
-    clearPhotoPreview();
-    elements.previewImage.src = entry.photo.url;
-    elements.photoPreview.hidden = false;
-  } else {
-    clearPhotoPreview();
+  elements.photoInput.value = "";
+  if (elements.removePhotoCheckbox) {
+    elements.removePhotoCheckbox.checked = false;
+  }
+
+  clearPhotoPreview();
+  if (entry.photo?.fileId) {
+    if (elements.removePhotoField) {
+      elements.removePhotoField.hidden = false;
+    }
+    showEditingPhoto(entry.photo);
+  } else if (elements.removePhotoField) {
+    elements.removePhotoField.hidden = true;
   }
 
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function showEditingPhoto(photo) {
+  if (!photo?.fileId) {
+    return;
+  }
+  try {
+    const url = await getPhotoBlobUrl(photo.fileId);
+    if (state.editingEntryId && elements.previewImage) {
+      elements.previewImage.src = url;
+      elements.photoPreview.hidden = false;
+    }
+  } catch (error) {
+    console.warn("Failed to load existing photo:", error);
+  }
 }
 
 async function deleteEntry(entryId) {
@@ -392,6 +451,12 @@ async function deleteEntry(entryId) {
     setSyncMessage("記録を削除しています...");
     state.entries = state.entries.filter((item) => item.id !== entryId);
     await saveEntriesToDrive();
+
+    if (entry.photo?.fileId) {
+      deleteDriveFile(entry.photo.fileId);
+      revokePhotoBlob(entry.photo.fileId);
+    }
+
     renderEntries();
     renderGraph();
 
@@ -470,6 +535,7 @@ async function ensureDriveStructure() {
 
 async function loadEntriesFromDrive() {
   await ensureDriveStructure();
+  clearPhotoBlobCache();
 
   if (!state.drive.entriesFileId) {
     state.entries = [];
@@ -519,8 +585,9 @@ async function saveEntriesToDrive() {
 async function uploadPhoto(file, entryId) {
   const extension = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
   const safeExtension = extension.toLowerCase();
+  const uniqueSuffix = Date.now().toString(36);
   const metadata = {
-    name: `${entryId}${safeExtension}`,
+    name: `${entryId}-${uniqueSuffix}${safeExtension}`,
     mimeType: file.type || "image/jpeg",
     parents: [state.drive.photosFolderId]
   };
@@ -531,17 +598,24 @@ async function uploadPhoto(file, entryId) {
     fileBody: file
   });
 
-  await driveFetch(
-    `https://www.googleapis.com/drive/v3/files/${response.id}?fields=webViewLink,webContentLink`,
-    { method: "GET" }
-  );
-
   return {
     fileId: response.id,
     name: file.name,
-    mimeType: file.type || "image/jpeg",
-    url: `https://drive.google.com/thumbnail?id=${response.id}&sz=w1200`
+    mimeType: file.type || "image/jpeg"
   };
+}
+
+async function deleteDriveFile(fileId) {
+  if (!fileId) {
+    return;
+  }
+  try {
+    await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: "DELETE"
+    });
+  } catch (error) {
+    console.warn("Failed to delete Drive file:", fileId, error);
+  }
 }
 
 async function findOrCreateFolder(name, parentId = null, kind = null, cachedId = null) {
@@ -678,7 +752,13 @@ async function multipartUpload({ metadata, contentType, fileBody, fileId = null 
   return response.json();
 }
 
-async function driveFetch(url, options = {}) {
+async function driveFetch(url, options = {}, { retried = false } = {}) {
+  if (!state.accessToken) {
+    const error = new Error("Google Drive に接続されていません。");
+    error.status = 401;
+    throw error;
+  }
+
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -686,6 +766,13 @@ async function driveFetch(url, options = {}) {
       ...(options.headers || {})
     }
   });
+
+  if (response.status === 401 && !retried) {
+    const refreshed = await tryRefreshAccessToken();
+    if (refreshed) {
+      return driveFetch(url, options, { retried: true });
+    }
+  }
 
   if (!response.ok) {
     const detail = await response.text();
@@ -696,6 +783,30 @@ async function driveFetch(url, options = {}) {
   }
 
   return response;
+}
+
+async function tryRefreshAccessToken() {
+  if (!state.tokenClient || !navigator.onLine) {
+    return false;
+  }
+  try {
+    await new Promise((resolve, reject) => {
+      state.tokenClient.callback = (response) => {
+        if (response.error) {
+          reject(new Error(response.error));
+          return;
+        }
+        state.accessToken = response.access_token;
+        persistToken(response);
+        resolve(response);
+      };
+      state.tokenClient.requestAccessToken({ prompt: "" });
+    });
+    return true;
+  } catch (error) {
+    console.warn("Silent token refresh failed:", error);
+    return false;
+  }
 }
 
 function describeDriveError(error) {
@@ -800,14 +911,7 @@ function renderEntries() {
     article.tabIndex = 0;
     article.setAttribute("role", "button");
     article.setAttribute("aria-label", `${formatDate(entry.date)} の記録を編集`);
-    article.addEventListener("click", () => startEditing(entry.id));
-    article.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-      event.preventDefault();
-      startEditing(entry.id);
-    });
+    const hasPhoto = Boolean(entry.photo?.fileId);
     article.innerHTML = `
       <div>
         <p class="entry-meta">${formatDate(entry.date)} / 猫 ${formatNumber(entry.weight, 2)} kg / 飼い主 ${formatOptional(entry.ownerWeight, "kg", 1)}</p>
@@ -835,19 +939,74 @@ function renderEntries() {
         </div>
       </div>
       <div>
-        ${entry.photo?.url ? `<img class="entry-photo" src="${entry.photo.url}" alt="猫の記録写真">` : '<div class="empty-state">写真なし</div>'}
+        ${hasPhoto
+          ? `<img class="entry-photo" data-photo-id="${escapeHtml(entry.photo.fileId)}" alt="猫の記録写真">`
+          : '<div class="empty-state">写真なし</div>'}
       </div>
     `;
-    article.querySelector('[data-action="edit-entry"]')?.addEventListener("click", (event) => {
-      event.stopPropagation();
-      startEditing(entry.id);
-    });
-    article.querySelector('[data-action="delete-entry"]')?.addEventListener("click", (event) => {
-      event.stopPropagation();
-      deleteEntry(entry.id);
-    });
     elements.entriesList.appendChild(article);
+
+    if (hasPhoto) {
+      const img = article.querySelector(".entry-photo");
+      if (img) {
+        loadPhotoInto(img, entry.photo.fileId);
+      }
+    }
   });
+}
+
+async function loadPhotoInto(imgElement, fileId) {
+  try {
+    const url = await getPhotoBlobUrl(fileId);
+    if (imgElement.isConnected) {
+      imgElement.src = url;
+    }
+  } catch (error) {
+    console.warn("Failed to load photo:", error);
+    if (imgElement.isConnected) {
+      const placeholder = document.createElement("div");
+      placeholder.className = "entry-photo--broken";
+      placeholder.textContent = "写真を読み込めません";
+      imgElement.replaceWith(placeholder);
+    }
+  }
+}
+
+async function getPhotoBlobUrl(fileId) {
+  if (!fileId) {
+    throw new Error("Missing fileId");
+  }
+  if (photoBlobCache.has(fileId)) {
+    return photoBlobCache.get(fileId);
+  }
+  if (!state.accessToken) {
+    throw new Error("No access token");
+  }
+  const response = await driveFetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`
+  );
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  photoBlobCache.set(fileId, url);
+  return url;
+}
+
+function revokePhotoBlob(fileId) {
+  if (!fileId) {
+    return;
+  }
+  const url = photoBlobCache.get(fileId);
+  if (url) {
+    URL.revokeObjectURL(url);
+    photoBlobCache.delete(fileId);
+  }
+}
+
+function clearPhotoBlobCache() {
+  for (const url of photoBlobCache.values()) {
+    URL.revokeObjectURL(url);
+  }
+  photoBlobCache.clear();
 }
 
 function renderGraph() {

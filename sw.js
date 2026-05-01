@@ -1,4 +1,4 @@
-const CACHE_NAME = "catlog-shell-v13";
+const CACHE_NAME = "catlog-shell-v14";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -10,9 +10,15 @@ const APP_SHELL = [
   "./icons/icon-maskable.svg"
 ];
 
+const APP_SHELL_BASENAMES = APP_SHELL
+  .map((path) => path.replace(/^\.\//, ""))
+  .filter((path) => path.length > 0);
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(APP_SHELL.map((url) => new Request(url, { cache: "reload" })))
+    )
   );
   self.skipWaiting();
 });
@@ -25,10 +31,16 @@ self.addEventListener("activate", (event) => {
           .filter((key) => key !== CACHE_NAME)
           .map((key) => caches.delete(key))
       )
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
+
+function isAppShellRequest(pathname) {
+  return APP_SHELL_BASENAMES.some((asset) => {
+    const suffix = `/${asset}`;
+    return pathname === suffix || pathname.endsWith(suffix);
+  });
+}
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
@@ -43,14 +55,15 @@ self.addEventListener("fetch", (event) => {
 
   if (event.request.mode === "navigate") {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match("./index.html"))
+      fetch(event.request, { cache: "no-store" })
+        .catch(() => caches.match("./index.html"))
     );
     return;
   }
 
-  if (APP_SHELL.some((asset) => requestUrl.pathname.endsWith(asset.replace("./", "/")) || requestUrl.pathname.endsWith(asset.replace("./", "")))) {
+  if (isAppShellRequest(requestUrl.pathname)) {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: "no-store" })
         .then((response) => {
           if (response.ok) {
             const responseClone = response.clone();

@@ -9,12 +9,12 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Catlog">
   <meta name="description" content="猫の体重、食べ物、健康状態、写真を記録して Google Drive に保存するアプリ。">
-  <link rel="manifest" href="manifest.webmanifest?v=13">
+  <link rel="manifest" href="manifest.webmanifest?v=14">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
   <div class="page-shell">
@@ -131,6 +131,11 @@
             <img id="preview-image" alt="選択した写真のプレビュー">
           </div>
 
+          <label class="field field--checkbox" id="photo-remove-field" hidden>
+            <input id="remove-photo" name="removePhoto" type="checkbox">
+            <span>保存時に既存の写真を削除する</span>
+          </label>
+
           <div class="form-actions">
             <button id="save-button" class="button button--primary button--wide" type="submit">記録を保存</button>
             <button id="cancel-edit-button" class="button button--ghost button--wide" type="button" hidden>編集をキャンセル</button>
@@ -170,6 +175,6 @@
 
   <script src="config.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="app.js?v=13" defer></script>
+  <script src="app.js?v=14" defer></script>
 </body>
 </html>
