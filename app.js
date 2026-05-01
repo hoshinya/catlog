@@ -1,8 +1,10 @@
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+const AUTH_VERSION = "drive-scope-v1";
 const STORAGE_KEYS = {
   accessToken: "catlog.accessToken",
   tokenExpiry: "catlog.tokenExpiry",
-  hasAuthorized: "catlog.hasAuthorized"
+  hasAuthorized: "catlog.hasAuthorized",
+  authVersion: "catlog.authVersion"
 };
 
 const config = window.CATLOG_CONFIG || {};
@@ -780,6 +782,14 @@ function updateAuthUI(isConnected) {
 function restoreSavedSession() {
   const storedToken = localStorage.getItem(STORAGE_KEYS.accessToken);
   const storedExpiry = Number(localStorage.getItem(STORAGE_KEYS.tokenExpiry) || 0);
+  const storedAuthVersion = localStorage.getItem(STORAGE_KEYS.authVersion);
+
+  if (storedAuthVersion !== AUTH_VERSION) {
+    clearSavedSession();
+    localStorage.removeItem(STORAGE_KEYS.hasAuthorized);
+    localStorage.setItem(STORAGE_KEYS.authVersion, AUTH_VERSION);
+    return;
+  }
 
   if (!storedToken || !storedExpiry) {
     return;
@@ -815,6 +825,7 @@ function persistToken(response) {
   localStorage.setItem(STORAGE_KEYS.accessToken, response.access_token);
   localStorage.setItem(STORAGE_KEYS.tokenExpiry, String(expiresAt));
   localStorage.setItem(STORAGE_KEYS.hasAuthorized, "true");
+  localStorage.setItem(STORAGE_KEYS.authVersion, AUTH_VERSION);
 }
 
 function clearSavedSession() {
@@ -909,7 +920,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    await navigator.serviceWorker.register("./sw.js?v=6", { updateViaCache: "none" });
+    await navigator.serviceWorker.register("./sw.js?v=7", { updateViaCache: "none" });
   } catch (error) {
     console.error("Service worker registration failed:", error);
   }
