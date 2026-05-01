@@ -255,8 +255,9 @@ async function handleSubmit(event) {
     showToast(existing ? "記録を更新しました。" : "記録を保存しました。");
   } catch (error) {
     console.error(error);
-    setSyncMessage("保存に失敗しました。設定や権限をご確認ください。");
-    showToast("保存に失敗しました。");
+    const errorMessage = describeDriveError(error);
+    setSyncMessage(errorMessage);
+    showToast(errorMessage);
   } finally {
     elements.saveButton.disabled = false;
   }
@@ -643,10 +644,39 @@ async function driveFetch(url, options = {}) {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(detail || `Drive request failed: ${response.status}`);
+    const error = new Error(detail || `Drive request failed: ${response.status}`);
+    error.status = response.status;
+    error.detail = detail || "";
+    throw error;
   }
 
   return response;
+}
+
+function describeDriveError(error) {
+  const message = String(error?.message || "");
+  const rawDetail = String(error?.detail || message || "").replace(/\s+/g, " ").trim();
+  const apiMessage = extractApiMessage(rawDetail);
+  const status = error?.status ? ` (HTTP ${error.status})` : "";
+
+  if (apiMessage) {
+    return `保存に失敗しました${status}: ${apiMessage}`;
+  }
+
+  if (rawDetail) {
+    return `保存に失敗しました${status}: ${rawDetail.slice(0, 160)}`;
+  }
+
+  return `保存に失敗しました${status}。設定や権限をご確認ください。`;
+}
+
+function extractApiMessage(message) {
+  try {
+    const parsed = JSON.parse(message);
+    return parsed?.error?.message || "";
+  } catch {
+    return "";
+  }
 }
 
 async function getAccessibleDriveFile(fileId) {
@@ -1009,7 +1039,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    await navigator.serviceWorker.register("./sw.js?v=10", { updateViaCache: "none" });
+    await navigator.serviceWorker.register("./sw.js?v=11", { updateViaCache: "none" });
   } catch (error) {
     console.error("Service worker registration failed:", error);
   }
