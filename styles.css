@@ -257,9 +257,18 @@ h2 {
   resize: vertical;
 }
 
+.field--inline {
+  grid-template-columns: 1fr 1fr;
+}
+
+.field--inline label {
+  display: grid;
+  gap: 8px;
+}
+
 .food-composer {
   display: grid;
-  grid-template-columns: 128px 1fr auto;
+  grid-template-columns: 1fr auto;
   gap: 10px;
 }
 
@@ -489,6 +498,7 @@ body.is-offline .hero__status {
   }
 
   .status-inline,
+  .field--inline,
   .food-composer,
   .entry-stats {
     grid-template-columns: 1fr;

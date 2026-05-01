@@ -9,19 +9,19 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Catlog">
   <meta name="description" content="猫の体重、食べ物、健康状態、写真を記録して Google Drive に保存するアプリ。">
-  <link rel="manifest" href="manifest.webmanifest?v=5">
+  <link rel="manifest" href="manifest.webmanifest?v=3">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
   <div class="page-shell">
     <header class="hero">
       <div class="hero__copy">
         <p class="eyebrow">Google Drive synced cat journal</p>
-        <h1>猫log</h1>
+        <h1>猫記録</h1>
         <p class="hero__text">
           体重、食べ物、健康状態、写真をまとめて記録し、
           Google Drive に保存できる猫と暮らしの記録アプリです。
@@ -94,7 +94,6 @@
           <div class="field">
             <span>食べ物</span>
             <div class="food-composer">
-              <input id="food-time-input" type="time" aria-label="食べ物の時刻">
               <input id="food-input" type="text" placeholder="食べたものを追加">
               <button id="add-food-button" class="button button--ghost" type="button">追加</button>
             </div>
@@ -103,17 +102,28 @@
           </div>
 
           <label class="field">
+            <span>給水量 (ml)</span>
+            <input id="water-intake" name="waterIntake" type="number" min="0" step="1" placeholder="180">
+          </label>
+
+          <label class="field">
             <span>健康状態</span>
             <textarea id="health" name="health" rows="4" placeholder="元気、食欲あり。少しくしゃみ。" required></textarea>
           </label>
 
-          <label class="field">
-            <span>うんち回数</span>
-            <input id="poop-count" name="poopCount" type="number" min="0" step="1" placeholder="1">
-          </label>
+          <div class="field field--inline">
+            <label>
+              <span>おしっこ回数</span>
+              <input id="pee-count" name="peeCount" type="number" min="0" step="1" placeholder="2">
+            </label>
+            <label>
+              <span>うんち回数</span>
+              <input id="poop-count" name="poopCount" type="number" min="0" step="1" placeholder="1">
+            </label>
+          </div>
 
           <label class="field">
-            <span>写真 (任意)</span>
+            <span>写真</span>
             <input id="photo" name="photo" type="file" accept="image/*">
           </label>
 
@@ -160,6 +170,6 @@
 
   <script src="config.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="app.js?v=5" defer></script>
+  <script src="app.js?v=3" defer></script>
 </body>
 </html>
