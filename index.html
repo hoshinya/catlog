@@ -9,12 +9,12 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Catlog">
   <meta name="description" content="猫の体重、食べ物、健康状態、写真を記録して Google Drive に保存するアプリ。">
-  <link rel="manifest" href="manifest.webmanifest?v=16">
+  <link rel="manifest" href="manifest.webmanifest?v=17">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
   <div class="page-shell">
@@ -51,7 +51,11 @@
           <p class="section-heading__eyebrow">Trend</p>
           <h2>体重グラフ</h2>
         </div>
-        <p class="section-heading__note">猫と飼い主の体重推移をまとめて確認できます。</p>
+        <div class="period-filter" id="period-filter" role="tablist" aria-label="期間フィルタ">
+          <button type="button" class="period-filter__button" data-period="7" role="tab">7日</button>
+          <button type="button" class="period-filter__button is-active" data-period="30" role="tab" aria-selected="true">30日</button>
+          <button type="button" class="period-filter__button" data-period="all" role="tab">全期間</button>
+        </div>
       </div>
       <div id="graph-empty" class="empty-state">
         記録が増えると、ここに体重の推移が表示されます。
@@ -66,13 +70,17 @@
     </section>
 
     <main class="layout">
-      <section class="card form-card">
-        <div class="section-heading">
-          <div>
-            <p class="section-heading__eyebrow">New entry</p>
-            <h2 id="form-title">記録を追加</h2>
+      <div class="sheet-backdrop" id="form-backdrop" hidden></div>
+      <section class="card form-card" id="form-card">
+        <div class="form-card__header">
+          <div class="section-heading">
+            <div>
+              <p class="section-heading__eyebrow">New entry</p>
+              <h2 id="form-title">記録を追加</h2>
+            </div>
+            <p class="section-heading__note" id="form-note">保存時に JSON と写真を Google Drive へアップロードします。</p>
           </div>
-          <p class="section-heading__note" id="form-note">保存時に JSON と写真を Google Drive へアップロードします。</p>
+          <button id="close-sheet-button" class="sheet-close" type="button" aria-label="閉じる">×</button>
         </div>
 
         <form id="entry-form" class="entry-form">
@@ -97,14 +105,22 @@
               <input id="food-input" type="text" placeholder="食べたものを追加">
               <button id="add-food-button" class="button button--ghost" type="button">追加</button>
             </div>
-            <div id="food-list-empty" class="mini-note">まだ追加されていません。</div>
+            <div id="recent-foods" class="quick-tags quick-tags--recent" hidden>
+              <span class="quick-tags__label">最近</span>
+              <div id="recent-foods-list" class="quick-tags__list"></div>
+            </div>
+            <div id="food-list-empty" class="mini-note">まだ追加されていません。チップをドラッグして並べ替え、時刻はクリックで変更できます。</div>
             <div id="food-list" class="chip-list"></div>
           </div>
 
-          <label class="field">
+          <div class="field">
             <span>健康状態</span>
+            <div class="quick-tags" id="health-quick-tags">
+              <span class="quick-tags__label">よく使う</span>
+              <div class="quick-tags__list" id="health-quick-tags-list"></div>
+            </div>
             <textarea id="health" name="health" rows="4" placeholder="元気、食欲あり。少しくしゃみ。" required></textarea>
-          </label>
+          </div>
 
           <label class="field">
             <span>うんち回数</span>
@@ -133,21 +149,40 @@
         </form>
       </section>
 
-      <section class="card">
+      <section class="card history-card">
         <div class="section-heading">
           <div>
             <p class="section-heading__eyebrow">History</p>
             <h2>記録一覧</h2>
           </div>
-          <p class="section-heading__note">新しい順に表示されます。</p>
+          <div class="view-toggle" id="view-toggle" role="tablist" aria-label="表示切替">
+            <button type="button" class="view-toggle__button is-active" data-view="list" role="tab" aria-selected="true">一覧</button>
+            <button type="button" class="view-toggle__button" data-view="calendar" role="tab">カレンダー</button>
+          </div>
         </div>
 
-        <div id="entries-empty" class="empty-state">
-          まだ記録がありません。最初の 1 件を追加してみましょう。
+        <div id="list-view">
+          <div id="entries-empty" class="empty-state">
+            まだ記録がありません。最初の 1 件を追加してみましょう。
+          </div>
+          <div id="entries-list" class="entries-list"></div>
         </div>
-        <div id="entries-list" class="entries-list"></div>
+
+        <div id="calendar-view" class="calendar" hidden>
+          <div class="calendar__nav">
+            <button id="cal-prev" class="calendar__nav-button" type="button" aria-label="前の月">◀</button>
+            <strong id="cal-title" class="calendar__title"></strong>
+            <button id="cal-next" class="calendar__nav-button" type="button" aria-label="次の月">▶</button>
+          </div>
+          <div class="calendar__weekdays" aria-hidden="true">
+            <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
+          </div>
+          <div id="calendar-grid" class="calendar__grid"></div>
+        </div>
       </section>
     </main>
+
+    <button id="open-form-fab" class="fab" type="button" aria-label="記録を追加">＋</button>
 
     <section id="install-card" class="card install-card install-card--footer" hidden>
       <div>
@@ -165,6 +200,6 @@
 
   <script src="config.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="app.js?v=16" defer></script>
+  <script src="app.js?v=17" defer></script>
 </body>
 </html>

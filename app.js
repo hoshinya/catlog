@@ -5,8 +5,15 @@ const STORAGE_KEYS = {
   hasAuthorized: "catlog.hasAuthorized",
   rootFolderId: "catlog.rootFolderId",
   photosFolderId: "catlog.photosFolderId",
-  entriesFileId: "catlog.entriesFileId"
+  entriesFileId: "catlog.entriesFileId",
+  periodFilter: "catlog.periodFilter",
+  viewMode: "catlog.viewMode"
 };
+const HEALTH_QUICK_TAGS = ["元気", "食欲あり", "食欲なし", "嘔吐", "軟便", "下痢", "くしゃみ", "鼻水"];
+const RECENT_FOOD_LIMIT = 8;
+const VALID_PERIODS = ["7", "30", "all"];
+const VALID_VIEW_MODES = ["list", "calendar"];
+const MOBILE_MEDIA_QUERY = "(max-width: 900px)";
 const DRIVE_APP_PROPERTY_KEY = "catlogKind";
 const DRIVE_RESOURCE_KINDS = {
   rootFolder: "root-folder",
@@ -24,6 +31,10 @@ const state = {
   editingEntryId: null,
   draftFoods: [],
   pendingPhotoFile: null,
+  periodFilter: "30",
+  viewMode: "list",
+  calendarMonth: null, // { year, month } where month is 0-based
+  draggingFoodId: null,
   drive: {
     rootFolderId: null,
     photosFolderId: null,
@@ -62,7 +73,22 @@ const elements = {
   graphArea: document.getElementById("graph-area"),
   graphEmpty: document.getElementById("graph-empty"),
   weightGraph: document.getElementById("weight-graph"),
-  toast: document.getElementById("toast")
+  toast: document.getElementById("toast"),
+  periodFilter: document.getElementById("period-filter"),
+  viewToggle: document.getElementById("view-toggle"),
+  listView: document.getElementById("list-view"),
+  calendarView: document.getElementById("calendar-view"),
+  calendarGrid: document.getElementById("calendar-grid"),
+  calendarTitle: document.getElementById("cal-title"),
+  calendarPrev: document.getElementById("cal-prev"),
+  calendarNext: document.getElementById("cal-next"),
+  healthQuickTagsList: document.getElementById("health-quick-tags-list"),
+  recentFoods: document.getElementById("recent-foods"),
+  recentFoodsList: document.getElementById("recent-foods-list"),
+  formCard: document.getElementById("form-card"),
+  formBackdrop: document.getElementById("form-backdrop"),
+  openFormFab: document.getElementById("open-form-fab"),
+  closeSheetButton: document.getElementById("close-sheet-button")
 };
 
 const photoBlobCache = new Map();
@@ -105,24 +131,51 @@ function bootstrap() {
   elements.entryForm.addEventListener("submit", handleSubmit);
   elements.cancelEditButton.addEventListener("click", () => {
     resetForm();
+    closeFormSheet();
     showToast("編集をキャンセルしました。");
   });
   elements.entriesList.addEventListener("click", handleEntryListClick);
   elements.entriesList.addEventListener("keydown", handleEntryListKeydown);
+  elements.periodFilter?.addEventListener("click", handlePeriodFilterClick);
+  elements.viewToggle?.addEventListener("click", handleViewToggleClick);
+  elements.calendarPrev?.addEventListener("click", () => shiftCalendarMonth(-1));
+  elements.calendarNext?.addEventListener("click", () => shiftCalendarMonth(1));
+  elements.calendarGrid?.addEventListener("click", handleCalendarClick);
+  elements.healthQuickTagsList?.addEventListener("click", handleHealthQuickTagClick);
+  elements.recentFoodsList?.addEventListener("click", handleRecentFoodClick);
+  elements.foodList.addEventListener("dragstart", handleFoodDragStart);
+  elements.foodList.addEventListener("dragover", handleFoodDragOver);
+  elements.foodList.addEventListener("dragleave", handleFoodDragLeave);
+  elements.foodList.addEventListener("drop", handleFoodDrop);
+  elements.foodList.addEventListener("dragend", handleFoodDragEnd);
+  elements.openFormFab?.addEventListener("click", () => {
+    if (state.editingEntryId) {
+      resetForm();
+    }
+    openFormSheet();
+    elements.weight?.focus();
+  });
+  elements.closeSheetButton?.addEventListener("click", () => closeFormSheet());
+  elements.formBackdrop?.addEventListener("click", () => closeFormSheet());
+  document.addEventListener("keydown", handleGlobalKeydown);
   window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
   window.addEventListener("appinstalled", handleAppInstalled);
   window.addEventListener("online", handleConnectivityChange);
   window.addEventListener("offline", handleConnectivityChange);
 
   validateConfig();
+  restoreUserPreferences();
   restoreDriveState();
   restoreSavedSession();
   registerServiceWorker();
   refreshInstallUI();
   handleConnectivityChange();
+  renderHealthQuickTags();
   renderFoodDraft();
+  renderRecentFoods();
   renderEntries();
   renderGraph();
+  renderCalendar();
 }
 
 function resetForm() {
@@ -272,7 +325,10 @@ async function handleSubmit(event) {
 
     renderEntries();
     renderGraph();
+    renderRecentFoods();
+    renderCalendar();
     resetForm();
+    closeFormSheet();
     setSyncMessage("Google Drive と同期済みです。");
     showToast(existing ? "記録を更新しました。" : "記録を保存しました。");
   } catch (error) {
@@ -307,24 +363,136 @@ function renderFoodDraft() {
   state.draftFoods.forEach((item) => {
     const chip = document.createElement("div");
     chip.className = "chip";
+    chip.setAttribute("draggable", "true");
+    chip.dataset.foodChipId = item.id;
     chip.innerHTML = `
-      <span class="chip__time">${escapeHtml(item.time)}</span>
+      <span class="chip__time" data-action="edit-food-time" data-food-id="${item.id}" title="クリックで時刻を変更">${escapeHtml(item.time)}</span>
       <span>${escapeHtml(item.label)}</span>
-      <button class="chip__remove" type="button" data-food-id="${item.id}" aria-label="食べ物を削除">×</button>
+      <button class="chip__remove" type="button" data-action="remove-food" data-food-id="${item.id}" aria-label="食べ物を削除">×</button>
     `;
     elements.foodList.appendChild(chip);
   });
 }
 
 function handleFoodListClick(event) {
-  const button = event.target.closest("[data-food-id]");
-  if (!button) {
+  const timeTrigger = event.target.closest('[data-action="edit-food-time"]');
+  if (timeTrigger) {
+    event.preventDefault();
+    beginEditFoodTime(timeTrigger);
     return;
   }
 
-  const foodId = button.dataset.foodId;
-  state.draftFoods = state.draftFoods.filter((item) => item.id !== foodId);
+  const removeButton = event.target.closest('[data-action="remove-food"]');
+  if (removeButton) {
+    const foodId = removeButton.dataset.foodId;
+    state.draftFoods = state.draftFoods.filter((item) => item.id !== foodId);
+    renderFoodDraft();
+  }
+}
+
+function beginEditFoodTime(timeElement) {
+  if (timeElement.querySelector("input")) {
+    return;
+  }
+  const foodId = timeElement.dataset.foodId;
+  const original = timeElement.textContent.trim();
+  const initial = /^\d{2}:\d{2}$/.test(original) ? original : "";
+  const input = document.createElement("input");
+  input.type = "time";
+  input.className = "chip__time-input";
+  input.value = initial;
+
+  const finish = (commit) => {
+    if (commit && input.value) {
+      const food = state.draftFoods.find((item) => item.id === foodId);
+      if (food) {
+        food.time = input.value;
+      }
+    }
+    renderFoodDraft();
+  };
+
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      finish(false);
+    }
+  });
+
+  timeElement.replaceChildren(input);
+  input.focus();
+}
+
+function handleFoodDragStart(event) {
+  const chip = event.target.closest("[data-food-chip-id]");
+  if (!chip) {
+    return;
+  }
+  state.draggingFoodId = chip.dataset.foodChipId;
+  chip.classList.add("is-dragging");
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", chip.dataset.foodChipId);
+  }
+}
+
+function handleFoodDragOver(event) {
+  if (!state.draggingFoodId) {
+    return;
+  }
+  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "move";
+  }
+  const chip = event.target.closest("[data-food-chip-id]");
+  document.querySelectorAll(".chip.is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+  if (chip && chip.dataset.foodChipId !== state.draggingFoodId) {
+    chip.classList.add("is-drop-target");
+  }
+}
+
+function handleFoodDragLeave(event) {
+  const chip = event.target.closest("[data-food-chip-id]");
+  if (chip) {
+    chip.classList.remove("is-drop-target");
+  }
+}
+
+function handleFoodDrop(event) {
+  if (!state.draggingFoodId) {
+    return;
+  }
+  event.preventDefault();
+  const targetChip = event.target.closest("[data-food-chip-id]");
+  if (!targetChip || targetChip.dataset.foodChipId === state.draggingFoodId) {
+    state.draggingFoodId = null;
+    document.querySelectorAll(".chip.is-drop-target, .chip.is-dragging").forEach((el) => {
+      el.classList.remove("is-drop-target");
+      el.classList.remove("is-dragging");
+    });
+    return;
+  }
+  const fromIndex = state.draftFoods.findIndex((item) => item.id === state.draggingFoodId);
+  const toIndex = state.draftFoods.findIndex((item) => item.id === targetChip.dataset.foodChipId);
+  if (fromIndex === -1 || toIndex === -1) {
+    return;
+  }
+  const [moved] = state.draftFoods.splice(fromIndex, 1);
+  state.draftFoods.splice(toIndex, 0, moved);
+  state.draggingFoodId = null;
   renderFoodDraft();
+}
+
+function handleFoodDragEnd() {
+  state.draggingFoodId = null;
+  document.querySelectorAll(".chip.is-drop-target, .chip.is-dragging").forEach((el) => {
+    el.classList.remove("is-drop-target");
+    el.classList.remove("is-dragging");
+  });
 }
 
 function handlePhotoPreview(event) {
@@ -492,7 +660,10 @@ function startEditing(entryId) {
     elements.removePhotoField.hidden = true;
   }
 
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  openFormSheet();
+  if (!isMobileViewport()) {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 }
 
 async function showEditingPhoto(photo) {
@@ -538,9 +709,12 @@ async function deleteEntry(entryId) {
 
     renderEntries();
     renderGraph();
+    renderRecentFoods();
+    renderCalendar();
 
     if (state.editingEntryId === entryId) {
       resetForm();
+      closeFormSheet();
     }
 
     setSyncMessage("Google Drive と同期済みです。");
@@ -632,6 +806,8 @@ async function loadEntriesFromDrive() {
   state.entries = Array.isArray(data.entries) ? data.entries.map(normalizeEntry).sort(sortEntries) : [];
   renderEntries();
   renderGraph();
+  renderRecentFoods();
+  renderCalendar();
   setSyncMessage(`${state.entries.length} 件の記録を Google Drive から読み込みました。`);
 }
 
@@ -914,6 +1090,301 @@ function extractApiMessage(message) {
   }
 }
 
+/* -------- Health quick tags (#3) -------- */
+
+function renderHealthQuickTags() {
+  if (!elements.healthQuickTagsList) {
+    return;
+  }
+  elements.healthQuickTagsList.innerHTML = "";
+  HEALTH_QUICK_TAGS.forEach((tag) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "quick-tag";
+    button.dataset.tag = tag;
+    button.textContent = tag;
+    elements.healthQuickTagsList.appendChild(button);
+  });
+}
+
+function handleHealthQuickTagClick(event) {
+  const button = event.target.closest("[data-tag]");
+  if (!button) {
+    return;
+  }
+  appendHealthTag(button.dataset.tag);
+}
+
+function appendHealthTag(tag) {
+  const current = elements.health.value.trim();
+  if (current.includes(tag)) {
+    return;
+  }
+  elements.health.value = current ? `${current}、${tag}` : tag;
+  elements.health.dispatchEvent(new Event("input", { bubbles: true }));
+  elements.health.focus();
+}
+
+/* -------- Recent foods (#2) -------- */
+
+function renderRecentFoods() {
+  if (!elements.recentFoodsList || !elements.recentFoods) {
+    return;
+  }
+
+  const counts = new Map();
+  state.entries.forEach((entry) => {
+    (entry.foods || []).forEach((food) => {
+      const label = (food.label || "").trim();
+      if (!label) return;
+      counts.set(label, (counts.get(label) || 0) + 1);
+    });
+  });
+
+  const ranked = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, RECENT_FOOD_LIMIT)
+    .map(([label]) => label);
+
+  elements.recentFoodsList.innerHTML = "";
+  if (ranked.length === 0) {
+    elements.recentFoods.hidden = true;
+    return;
+  }
+
+  elements.recentFoods.hidden = false;
+  ranked.forEach((label) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "quick-tag";
+    button.dataset.foodLabel = label;
+    button.textContent = label;
+    elements.recentFoodsList.appendChild(button);
+  });
+}
+
+function handleRecentFoodClick(event) {
+  const button = event.target.closest("[data-food-label]");
+  if (!button) {
+    return;
+  }
+  state.draftFoods.push({
+    id: crypto.randomUUID(),
+    label: button.dataset.foodLabel,
+    time: currentTimeLabel()
+  });
+  renderFoodDraft();
+}
+
+/* -------- Period filter (#8) -------- */
+
+function handlePeriodFilterClick(event) {
+  const button = event.target.closest("[data-period]");
+  if (!button) return;
+  const period = button.dataset.period;
+  if (!VALID_PERIODS.includes(period) || period === state.periodFilter) {
+    return;
+  }
+  state.periodFilter = period;
+  setStoredValue(STORAGE_KEYS.periodFilter, period);
+  applyPeriodFilterUI();
+  renderEntries();
+  renderGraph();
+}
+
+function applyPeriodFilterUI() {
+  if (!elements.periodFilter) return;
+  elements.periodFilter.querySelectorAll("[data-period]").forEach((btn) => {
+    const isActive = btn.dataset.period === state.periodFilter;
+    btn.classList.toggle("is-active", isActive);
+    if (isActive) {
+      btn.setAttribute("aria-selected", "true");
+    } else {
+      btn.removeAttribute("aria-selected");
+    }
+  });
+}
+
+function getFilteredEntries() {
+  if (state.periodFilter === "all") {
+    return state.entries;
+  }
+  const days = Number(state.periodFilter);
+  if (!Number.isFinite(days) || days <= 0) {
+    return state.entries;
+  }
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - (days - 1));
+  return state.entries.filter((entry) => {
+    const date = new Date(entry.date);
+    return Number.isFinite(date.getTime()) && date >= cutoff;
+  });
+}
+
+/* -------- View toggle + calendar (#10) -------- */
+
+function handleViewToggleClick(event) {
+  const button = event.target.closest("[data-view]");
+  if (!button) return;
+  const view = button.dataset.view;
+  if (!VALID_VIEW_MODES.includes(view) || view === state.viewMode) {
+    return;
+  }
+  state.viewMode = view;
+  setStoredValue(STORAGE_KEYS.viewMode, view);
+  applyViewModeUI();
+  if (view === "calendar") {
+    renderCalendar();
+  }
+}
+
+function applyViewModeUI() {
+  if (elements.viewToggle) {
+    elements.viewToggle.querySelectorAll("[data-view]").forEach((btn) => {
+      const isActive = btn.dataset.view === state.viewMode;
+      btn.classList.toggle("is-active", isActive);
+      if (isActive) {
+        btn.setAttribute("aria-selected", "true");
+      } else {
+        btn.removeAttribute("aria-selected");
+      }
+    });
+  }
+  if (elements.listView) {
+    elements.listView.hidden = state.viewMode !== "list";
+  }
+  if (elements.calendarView) {
+    elements.calendarView.hidden = state.viewMode !== "calendar";
+  }
+}
+
+function shiftCalendarMonth(delta) {
+  if (!state.calendarMonth) return;
+  let { year, month } = state.calendarMonth;
+  month += delta;
+  while (month < 0) { month += 12; year -= 1; }
+  while (month > 11) { month -= 12; year += 1; }
+  state.calendarMonth = { year, month };
+  renderCalendar();
+}
+
+function renderCalendar() {
+  if (!elements.calendarGrid || !state.calendarMonth) return;
+
+  const { year, month } = state.calendarMonth;
+  elements.calendarTitle.textContent = `${year}年 ${month + 1}月`;
+
+  const firstOfMonth = new Date(year, month, 1);
+  const startDay = firstOfMonth.getDay(); // 0 = Sunday
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const totalCells = Math.ceil((startDay + daysInMonth) / 7) * 7;
+
+  const entriesByDate = new Map();
+  state.entries.forEach((entry) => {
+    if (!entriesByDate.has(entry.date)) {
+      entriesByDate.set(entry.date, entry);
+    }
+  });
+
+  const todayKey = new Date().toISOString().slice(0, 10);
+
+  elements.calendarGrid.innerHTML = "";
+  for (let i = 0; i < totalCells; i++) {
+    const dayOffset = i - startDay;
+    const date = new Date(year, month, 1 + dayOffset);
+    const dateKey = formatDateKey(date);
+    const isOutside = date.getMonth() !== month;
+    const entry = entriesByDate.get(dateKey);
+
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "calendar__cell";
+    cell.dataset.date = dateKey;
+    if (entry) cell.dataset.entryId = entry.id;
+    if (isOutside) cell.classList.add("calendar__cell--outside");
+    if (dateKey === todayKey) cell.classList.add("calendar__cell--today");
+    if (entry) cell.classList.add("calendar__cell--has-entry");
+
+    cell.innerHTML = `
+      <span class="calendar__day-number">${date.getDate()}</span>
+      ${entry ? `<span class="calendar__weight">${formatNumber(entry.weight, 2)}kg</span>` : ""}
+    `;
+    elements.calendarGrid.appendChild(cell);
+  }
+}
+
+function handleCalendarClick(event) {
+  const cell = event.target.closest(".calendar__cell");
+  if (!cell) return;
+  const entryId = cell.dataset.entryId;
+  if (entryId) {
+    startEditing(entryId);
+    return;
+  }
+  // No entry — open form prefilled with that date
+  const date = cell.dataset.date;
+  if (!date) return;
+  resetForm();
+  elements.date.value = date;
+  openFormSheet();
+  elements.weight?.focus();
+}
+
+function formatDateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/* -------- Mobile bottom sheet (#13) -------- */
+
+function isMobileViewport() {
+  return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
+}
+
+function openFormSheet() {
+  if (!elements.formCard) return;
+  elements.formCard.classList.add("is-open");
+  if (elements.formBackdrop) {
+    elements.formBackdrop.hidden = false;
+    requestAnimationFrame(() => {
+      elements.formBackdrop.classList.add("is-open");
+    });
+  }
+  if (isMobileViewport()) {
+    document.body.classList.add("is-sheet-open");
+  }
+}
+
+function closeFormSheet() {
+  if (!elements.formCard) return;
+  elements.formCard.classList.remove("is-open");
+  if (elements.formBackdrop) {
+    elements.formBackdrop.classList.remove("is-open");
+    setTimeout(() => {
+      if (!elements.formBackdrop.classList.contains("is-open")) {
+        elements.formBackdrop.hidden = true;
+      }
+    }, 220);
+  }
+  document.body.classList.remove("is-sheet-open");
+}
+
+function handleGlobalKeydown(event) {
+  if (event.key !== "Escape") return;
+  if (state.editingEntryId) {
+    resetForm();
+    showToast("編集をキャンセルしました。");
+    closeFormSheet();
+    return;
+  }
+  if (elements.formCard?.classList.contains("is-open")) {
+    closeFormSheet();
+  }
+}
+
 async function getAccessibleDriveFile(fileId) {
   if (!fileId) {
     return null;
@@ -981,9 +1452,15 @@ function matchesParent(file, parentId) {
 
 function renderEntries() {
   elements.entriesList.innerHTML = "";
-  elements.entriesEmpty.hidden = state.entries.length > 0;
+  const visible = getFilteredEntries();
+  elements.entriesEmpty.hidden = visible.length > 0;
+  if (visible.length === 0 && state.entries.length > 0) {
+    elements.entriesEmpty.textContent = "選択した期間内の記録はありません。";
+  } else {
+    elements.entriesEmpty.textContent = "まだ記録がありません。最初の 1 件を追加してみましょう。";
+  }
 
-  state.entries.forEach((entry) => {
+  visible.forEach((entry) => {
     const article = document.createElement("article");
     article.className = "entry-card";
     article.dataset.entryId = entry.id;
@@ -1085,7 +1562,7 @@ function clearPhotoBlobCache() {
 }
 
 function renderGraph() {
-  const graphEntries = [...state.entries]
+  const graphEntries = getFilteredEntries()
     .filter((entry) => Number.isFinite(entry.weight))
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
@@ -1249,6 +1726,22 @@ function persistDriveState() {
   setStoredValue(STORAGE_KEYS.rootFolderId, state.drive.rootFolderId);
   setStoredValue(STORAGE_KEYS.photosFolderId, state.drive.photosFolderId);
   setStoredValue(STORAGE_KEYS.entriesFileId, state.drive.entriesFileId);
+}
+
+function restoreUserPreferences() {
+  const period = localStorage.getItem(STORAGE_KEYS.periodFilter);
+  if (VALID_PERIODS.includes(period)) {
+    state.periodFilter = period;
+  }
+  const view = localStorage.getItem(STORAGE_KEYS.viewMode);
+  if (VALID_VIEW_MODES.includes(view)) {
+    state.viewMode = view;
+  }
+  applyPeriodFilterUI();
+  applyViewModeUI();
+
+  const today = new Date();
+  state.calendarMonth = { year: today.getFullYear(), month: today.getMonth() };
 }
 
 function clearDriveState() {
