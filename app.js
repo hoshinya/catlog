@@ -1829,7 +1829,7 @@ function handleBeforeInstallPrompt(event) {
 function handleAppInstalled() {
   state.installPrompt = null;
   refreshInstallUI();
-  showToast("Catlog をホーム画面に追加しました。");
+  showToast("猫log をホーム画面に追加しました。");
 }
 
 async function installApp() {

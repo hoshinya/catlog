@@ -1,6 +1,6 @@
 {
-  "name": "Catlog",
-  "short_name": "Catlog",
+  "name": "猫log",
+  "short_name": "猫log",
   "description": "猫の体重、食べ物、健康状態、写真を記録して Google Drive に保存するアプリ。",
   "lang": "ja",
   "start_url": "./",
