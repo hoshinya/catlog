@@ -1,4 +1,4 @@
-const CACHE_NAME = "catlog-shell-v18";
+const CACHE_NAME = "catlog-shell-v19";
 const APP_SHELL = [
   "./",
   "./index.html",

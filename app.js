@@ -58,6 +58,7 @@ const elements = {
   weight: document.getElementById("weight"),
   ownerWeight: document.getElementById("owner-weight"),
   foodInput: document.getElementById("food-input"),
+  foodTime: document.getElementById("food-time"),
   addFoodButton: document.getElementById("add-food-button"),
   foodList: document.getElementById("food-list"),
   foodListEmpty: document.getElementById("food-list-empty"),
@@ -187,6 +188,9 @@ function resetForm() {
   elements.cancelEditButton.hidden = true;
   state.editingEntryId = null;
   state.draftFoods = [];
+  if (elements.foodTime) {
+    elements.foodTime.value = currentTimeLabel30Min();
+  }
   state.pendingPhotoFile = null;
   if (elements.removePhotoCheckbox) {
     elements.removePhotoCheckbox.checked = false;
@@ -350,10 +354,18 @@ function addFoodItemFromInput() {
   state.draftFoods.push({
     id: crypto.randomUUID(),
     label: text,
-    time: currentTimeLabel()
+    time: getDraftFoodTime()
   });
   elements.foodInput.value = "";
   renderFoodDraft();
+}
+
+function getDraftFoodTime() {
+  const value = elements.foodTime?.value;
+  if (value && /^\d{2}:\d{2}$/.test(value)) {
+    return roundTimeTo30Min(value);
+  }
+  return currentTimeLabel30Min();
 }
 
 function renderFoodDraft() {
@@ -366,7 +378,6 @@ function renderFoodDraft() {
     chip.setAttribute("draggable", "true");
     chip.dataset.foodChipId = item.id;
     chip.innerHTML = `
-      <span class="chip__time" data-action="edit-food-time" data-food-id="${item.id}" title="クリックで時刻を変更">${escapeHtml(item.time)}</span>
       <span>${escapeHtml(item.label)}</span>
       <button class="chip__remove" type="button" data-action="remove-food" data-food-id="${item.id}" aria-label="食べ物を削除">×</button>
     `;
@@ -375,56 +386,12 @@ function renderFoodDraft() {
 }
 
 function handleFoodListClick(event) {
-  const timeTrigger = event.target.closest('[data-action="edit-food-time"]');
-  if (timeTrigger) {
-    event.preventDefault();
-    beginEditFoodTime(timeTrigger);
-    return;
-  }
-
   const removeButton = event.target.closest('[data-action="remove-food"]');
   if (removeButton) {
     const foodId = removeButton.dataset.foodId;
     state.draftFoods = state.draftFoods.filter((item) => item.id !== foodId);
     renderFoodDraft();
   }
-}
-
-function beginEditFoodTime(timeElement) {
-  if (timeElement.querySelector("input")) {
-    return;
-  }
-  const foodId = timeElement.dataset.foodId;
-  const original = timeElement.textContent.trim();
-  const initial = /^\d{2}:\d{2}$/.test(original) ? original : "";
-  const input = document.createElement("input");
-  input.type = "time";
-  input.className = "chip__time-input";
-  input.value = initial;
-
-  const finish = (commit) => {
-    if (commit && input.value) {
-      const food = state.draftFoods.find((item) => item.id === foodId);
-      if (food) {
-        food.time = input.value;
-      }
-    }
-    renderFoodDraft();
-  };
-
-  input.addEventListener("blur", () => finish(true));
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      input.blur();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      finish(false);
-    }
-  });
-
-  timeElement.replaceChildren(input);
-  input.focus();
 }
 
 function handleFoodDragStart(event) {
@@ -1171,7 +1138,7 @@ function handleRecentFoodClick(event) {
   state.draftFoods.push({
     id: crypto.randomUUID(),
     label: button.dataset.foodLabel,
-    time: currentTimeLabel()
+    time: getDraftFoodTime()
   });
   renderFoodDraft();
 }
@@ -1482,7 +1449,7 @@ function renderEntries() {
         <div>
           <strong>食べ物:</strong>
           <ul class="entry-food-list">
-            ${entry.foods.map((food) => `<li><time>${escapeHtml(food.time || "--:--")}</time>${escapeHtml(food.label)}</li>`).join("")}
+            ${entry.foods.map((food) => `<li>${escapeHtml(food.label)}</li>`).join("")}
           </ul>
         </div>
         <div class="entry-actions">
@@ -1918,12 +1885,23 @@ function parseOptionalInteger(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function currentTimeLabel() {
-  return new Intl.DateTimeFormat("ja-JP", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).format(new Date());
+function currentTimeLabel30Min() {
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = now.getMinutes() < 30 ? 0 : 30;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function roundTimeTo30Min(value) {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) {
+    return value;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const rounded = minutes < 15 ? 0 : minutes < 45 ? 30 : 0;
+  const carryHour = minutes >= 45 ? (hours + 1) % 24 : hours;
+  return `${String(carryHour).padStart(2, "0")}:${String(rounded).padStart(2, "0")}`;
 }
 
 function escapeDriveQuery(text) {

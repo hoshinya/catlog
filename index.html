@@ -9,12 +9,12 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="猫log">
   <meta name="description" content="猫の体重、食べ物、健康状態、写真を記録して Google Drive に保存するアプリ。">
-  <link rel="manifest" href="manifest.webmanifest?v=18">
+  <link rel="manifest" href="manifest.webmanifest?v=19">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=18">
+  <link rel="stylesheet" href="styles.css?v=19">
 </head>
 <body>
   <div class="page-shell">
@@ -102,6 +102,7 @@
           <div class="field">
             <span>食べ物</span>
             <div class="food-composer">
+              <input id="food-time" type="time" step="1800" aria-label="食べた時刻">
               <input id="food-input" type="text" placeholder="食べたものを追加">
               <button id="add-food-button" class="button button--ghost" type="button">追加</button>
             </div>
@@ -109,7 +110,7 @@
               <span class="quick-tags__label">最近</span>
               <div id="recent-foods-list" class="quick-tags__list"></div>
             </div>
-            <div id="food-list-empty" class="mini-note">まだ追加されていません。チップをドラッグして並べ替え、時刻はクリックで変更できます。</div>
+            <div id="food-list-empty" class="mini-note">まだ追加されていません。チップをドラッグして並べ替えできます。</div>
             <div id="food-list" class="chip-list"></div>
           </div>
 
@@ -200,6 +201,6 @@
 
   <script src="config.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="app.js?v=18" defer></script>
+  <script src="app.js?v=19" defer></script>
 </body>
 </html>

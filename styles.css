@@ -372,28 +372,6 @@ h2 {
   outline-offset: 2px;
 }
 
-.chip__time {
-  font-size: 0.78rem;
-  color: var(--muted);
-  cursor: text;
-  border-radius: 4px;
-  padding: 1px 4px;
-}
-
-.chip__time:hover {
-  background: rgba(184, 92, 56, 0.12);
-}
-
-.chip__time-input {
-  border: 1px solid rgba(184, 92, 56, 0.4);
-  background: #fffaf2;
-  border-radius: 4px;
-  padding: 1px 4px;
-  font: inherit;
-  font-size: 0.82rem;
-  width: 5.5rem;
-}
-
 /* Period filter */
 .period-filter,
 .view-toggle {
@@ -591,7 +569,7 @@ h2 {
 
 .food-composer {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   gap: 10px;
 }
 
@@ -609,11 +587,6 @@ h2 {
   border-radius: 999px;
   background: rgba(184, 92, 56, 0.1);
   border: 1px solid rgba(184, 92, 56, 0.18);
-}
-
-.chip__time {
-  font-size: 0.78rem;
-  color: var(--muted);
 }
 
 .chip__remove {
@@ -731,14 +704,6 @@ h2 {
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.58);
   border: 1px solid var(--line);
-}
-
-.entry-food-list time {
-  display: inline-block;
-  min-width: 3.5rem;
-  margin-right: 8px;
-  color: var(--muted);
-  font-size: 0.88rem;
 }
 
 .entry-photo {
