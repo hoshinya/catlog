@@ -1099,19 +1099,25 @@ function renderRecentFoods() {
     return;
   }
 
-  const counts = new Map();
-  state.entries.forEach((entry) => {
-    (entry.foods || []).forEach((food) => {
-      const label = (food.label || "").trim();
-      if (!label) return;
-      counts.set(label, (counts.get(label) || 0) + 1);
-    });
+  // 日付の新しい順にエントリを走査し、各記録内の食べ物も後ろから（後に追加されたものほど新しい想定）拾う。
+  // 時刻は無視。重複は除いて最大 RECENT_FOOD_LIMIT 件まで集める。
+  const sortedEntries = [...state.entries].sort((a, b) => {
+    return new Date(b.date).getTime() - new Date(a.date).getTime();
   });
 
-  const ranked = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, RECENT_FOOD_LIMIT)
-    .map(([label]) => label);
+  const seen = new Set();
+  const ranked = [];
+  for (const entry of sortedEntries) {
+    const foods = entry.foods || [];
+    for (let i = foods.length - 1; i >= 0; i--) {
+      const label = (foods[i].label || "").trim();
+      if (!label || seen.has(label)) continue;
+      seen.add(label);
+      ranked.push(label);
+      if (ranked.length >= RECENT_FOOD_LIMIT) break;
+    }
+    if (ranked.length >= RECENT_FOOD_LIMIT) break;
+  }
 
   elements.recentFoodsList.innerHTML = "";
   if (ranked.length === 0) {
