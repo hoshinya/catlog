@@ -9,12 +9,12 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="猫log">
   <meta name="description" content="猫の体重、食べ物、健康状態、写真を記録して Google Drive に保存するアプリ。">
-  <link rel="manifest" href="manifest.webmanifest?v=20">
+  <link rel="manifest" href="manifest.webmanifest?v=21">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20">
+  <link rel="stylesheet" href="styles.css?v=21">
 </head>
 <body>
   <div class="page-shell">
@@ -159,6 +159,7 @@
           <div class="view-toggle" id="view-toggle" role="tablist" aria-label="表示切替">
             <button type="button" class="view-toggle__button is-active" data-view="list" role="tab" aria-selected="true">一覧</button>
             <button type="button" class="view-toggle__button" data-view="calendar" role="tab">カレンダー</button>
+            <button type="button" class="view-toggle__button" data-view="summary" role="tab">まとめ</button>
           </div>
         </div>
 
@@ -167,6 +168,11 @@
             まだ記録がありません。最初の 1 件を追加してみましょう。
           </div>
           <div id="entries-list" class="entries-list"></div>
+          <div id="entries-pagination" class="pagination" hidden>
+            <button id="entries-prev" class="button button--ghost" type="button">← 新しい記事</button>
+            <span id="entries-page-info" class="pagination__info"></span>
+            <button id="entries-next" class="button button--ghost" type="button">古い記事 →</button>
+          </div>
         </div>
 
         <div id="calendar-view" class="calendar" hidden>
@@ -179,6 +185,15 @@
             <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
           </div>
           <div id="calendar-grid" class="calendar__grid"></div>
+        </div>
+
+        <div id="summary-view" class="summary" hidden>
+          <div class="summary__nav">
+            <button id="sum-prev" class="calendar__nav-button" type="button" aria-label="前の月">◀</button>
+            <strong id="sum-title" class="calendar__title"></strong>
+            <button id="sum-next" class="calendar__nav-button" type="button" aria-label="次の月">▶</button>
+          </div>
+          <div id="summary-content" class="summary__content"></div>
         </div>
       </section>
     </main>
@@ -201,6 +216,6 @@
 
   <script src="config.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="app.js?v=20" defer></script>
+  <script src="app.js?v=21" defer></script>
 </body>
 </html>

@@ -7,13 +7,15 @@ const STORAGE_KEYS = {
   photosFolderId: "catlog.photosFolderId",
   entriesFileId: "catlog.entriesFileId",
   periodFilter: "catlog.periodFilter",
-  viewMode: "catlog.viewMode"
+  viewMode: "catlog.viewMode",
+  lastSeenMonth: "catlog.lastSeenMonth"
 };
 const HEALTH_QUICK_TAGS = ["元気", "食欲あり", "食欲なし", "嘔吐", "軟便", "下痢", "くしゃみ", "鼻水"];
 const RECENT_FOOD_LIMIT = 8;
 const VALID_PERIODS = ["7", "30", "all"];
-const VALID_VIEW_MODES = ["list", "calendar"];
+const VALID_VIEW_MODES = ["list", "calendar", "summary"];
 const MOBILE_MEDIA_QUERY = "(max-width: 900px)";
+const ENTRIES_PAGE_SIZE = 10;
 const DRIVE_APP_PROPERTY_KEY = "catlogKind";
 const DRIVE_RESOURCE_KINDS = {
   rootFolder: "root-folder",
@@ -34,6 +36,8 @@ const state = {
   periodFilter: "30",
   viewMode: "list",
   calendarMonth: null, // { year, month } where month is 0-based
+  summaryMonth: null,  // { year, month } where month is 0-based
+  entriesPage: 1,
   draggingFoodId: null,
   drive: {
     rootFolderId: null,
@@ -89,7 +93,16 @@ const elements = {
   formCard: document.getElementById("form-card"),
   formBackdrop: document.getElementById("form-backdrop"),
   openFormFab: document.getElementById("open-form-fab"),
-  closeSheetButton: document.getElementById("close-sheet-button")
+  closeSheetButton: document.getElementById("close-sheet-button"),
+  entriesPagination: document.getElementById("entries-pagination"),
+  entriesPrev: document.getElementById("entries-prev"),
+  entriesNext: document.getElementById("entries-next"),
+  entriesPageInfo: document.getElementById("entries-page-info"),
+  summaryView: document.getElementById("summary-view"),
+  summaryContent: document.getElementById("summary-content"),
+  summaryTitle: document.getElementById("sum-title"),
+  summaryPrev: document.getElementById("sum-prev"),
+  summaryNext: document.getElementById("sum-next")
 };
 
 const photoBlobCache = new Map();
@@ -142,6 +155,10 @@ function bootstrap() {
   elements.calendarPrev?.addEventListener("click", () => shiftCalendarMonth(-1));
   elements.calendarNext?.addEventListener("click", () => shiftCalendarMonth(1));
   elements.calendarGrid?.addEventListener("click", handleCalendarClick);
+  elements.summaryPrev?.addEventListener("click", () => shiftSummaryMonth(-1));
+  elements.summaryNext?.addEventListener("click", () => shiftSummaryMonth(1));
+  elements.entriesPrev?.addEventListener("click", () => changeEntriesPage(-1));
+  elements.entriesNext?.addEventListener("click", () => changeEntriesPage(1));
   elements.healthQuickTagsList?.addEventListener("click", handleHealthQuickTagClick);
   elements.recentFoodsList?.addEventListener("click", handleRecentFoodClick);
   elements.foodList.addEventListener("dragstart", handleFoodDragStart);
@@ -177,6 +194,7 @@ function bootstrap() {
   renderEntries();
   renderGraph();
   renderCalendar();
+  renderSummary();
 }
 
 function resetForm() {
@@ -327,10 +345,12 @@ async function handleSubmit(event) {
       revokePhotoBlob(previousFileId);
     }
 
+    resetEntriesPage();
     renderEntries();
     renderGraph();
     renderRecentFoods();
     renderCalendar();
+    renderSummary();
     resetForm();
     closeFormSheet();
     setSyncMessage("Google Drive と同期済みです。");
@@ -678,6 +698,7 @@ async function deleteEntry(entryId) {
     renderGraph();
     renderRecentFoods();
     renderCalendar();
+    renderSummary();
 
     if (state.editingEntryId === entryId) {
       resetForm();
@@ -771,10 +792,13 @@ async function loadEntriesFromDrive() {
 
   const data = await response.json();
   state.entries = Array.isArray(data.entries) ? data.entries.map(normalizeEntry).sort(sortEntries) : [];
+  resetEntriesPage();
   renderEntries();
   renderGraph();
   renderRecentFoods();
   renderCalendar();
+  renderSummary();
+  maybeNotifyMonthlyTransition();
   setSyncMessage(`${state.entries.length} 件の記録を Google Drive から読み込みました。`);
 }
 
@@ -1161,6 +1185,7 @@ function handlePeriodFilterClick(event) {
   state.periodFilter = period;
   setStoredValue(STORAGE_KEYS.periodFilter, period);
   applyPeriodFilterUI();
+  resetEntriesPage();
   renderEntries();
   renderGraph();
 }
@@ -1209,6 +1234,8 @@ function handleViewToggleClick(event) {
   applyViewModeUI();
   if (view === "calendar") {
     renderCalendar();
+  } else if (view === "summary") {
+    renderSummary();
   }
 }
 
@@ -1230,6 +1257,257 @@ function applyViewModeUI() {
   if (elements.calendarView) {
     elements.calendarView.hidden = state.viewMode !== "calendar";
   }
+  if (elements.summaryView) {
+    elements.summaryView.hidden = state.viewMode !== "summary";
+  }
+}
+
+/* -------- Entries pagination -------- */
+
+function renderEntriesPagination(totalCount, totalPages, start, pageLen) {
+  if (!elements.entriesPagination) return;
+  if (totalCount <= ENTRIES_PAGE_SIZE) {
+    elements.entriesPagination.hidden = true;
+    return;
+  }
+  elements.entriesPagination.hidden = false;
+  const firstIndex = start + 1;
+  const lastIndex = start + pageLen;
+  if (elements.entriesPageInfo) {
+    elements.entriesPageInfo.textContent =
+      `${totalCount} 件中 ${firstIndex} - ${lastIndex} 件目 (${state.entriesPage}/${totalPages})`;
+  }
+  if (elements.entriesPrev) elements.entriesPrev.disabled = state.entriesPage <= 1;
+  if (elements.entriesNext) elements.entriesNext.disabled = state.entriesPage >= totalPages;
+}
+
+function changeEntriesPage(delta) {
+  state.entriesPage += delta;
+  renderEntries();
+  if (elements.entriesList && state.viewMode === "list") {
+    elements.entriesList.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function resetEntriesPage() {
+  state.entriesPage = 1;
+}
+
+/* -------- Monthly summary (#まとめ) -------- */
+
+function shiftSummaryMonth(delta) {
+  if (!state.summaryMonth) return;
+  let { year, month } = state.summaryMonth;
+  month += delta;
+  while (month < 0) { month += 12; year -= 1; }
+  while (month > 11) { month -= 12; year += 1; }
+  state.summaryMonth = { year, month };
+  renderSummary();
+}
+
+function getEntriesForMonth(year, month) {
+  return state.entries.filter((entry) => {
+    const d = new Date(entry.date);
+    return (
+      Number.isFinite(d.getTime()) &&
+      d.getFullYear() === year &&
+      d.getMonth() === month
+    );
+  });
+}
+
+function buildMonthSummary(entries) {
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const sorted = [...entries].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+
+  const dayKeys = new Set(sorted.map((e) => e.date));
+  const weights = sorted.map((e) => e.weight).filter(Number.isFinite);
+  const ownerWeights = sorted.map((e) => e.ownerWeight).filter(Number.isFinite);
+  const firstWeight = weights.length ? weights[0] : null;
+  const lastWeight = weights.length ? weights[weights.length - 1] : null;
+  const weightDelta = (firstWeight != null && lastWeight != null)
+    ? lastWeight - firstWeight
+    : null;
+  const avgWeight = weights.length
+    ? weights.reduce((a, b) => a + b, 0) / weights.length
+    : null;
+  const minWeight = weights.length ? Math.min(...weights) : null;
+  const maxWeight = weights.length ? Math.max(...weights) : null;
+  const poopSum = sorted.reduce(
+    (sum, e) => sum + (Number.isFinite(e.poopCount) ? e.poopCount : 0),
+    0
+  );
+
+  const foodCounts = new Map();
+  sorted.forEach((e) =>
+    (e.foods || []).forEach((f) => {
+      const label = (f.label || "").trim();
+      if (!label) return;
+      foodCounts.set(label, (foodCounts.get(label) || 0) + 1);
+    })
+  );
+  const topFoods = [...foodCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  const tagCounts = HEALTH_QUICK_TAGS
+    .map((tag) => ({
+      tag,
+      count: sorted.filter((e) => (e.health || "").includes(tag)).length
+    }))
+    .filter((t) => t.count > 0)
+    .sort((a, b) => b.count - a.count);
+
+  const photos = sorted
+    .filter((e) => e.photo?.fileId)
+    .map((e) => ({ fileId: e.photo.fileId, entryId: e.id, date: e.date }));
+
+  return {
+    daysRecorded: dayKeys.size,
+    firstWeight, lastWeight, weightDelta,
+    avgWeight, minWeight, maxWeight,
+    avgOwnerWeight: ownerWeights.length
+      ? ownerWeights.reduce((a, b) => a + b, 0) / ownerWeights.length
+      : null,
+    poopSum,
+    poopAvg: dayKeys.size ? poopSum / dayKeys.size : null,
+    topFoods,
+    tagCounts,
+    photos
+  };
+}
+
+function renderSummary() {
+  if (!elements.summaryContent || !state.summaryMonth) return;
+  const { year, month } = state.summaryMonth;
+  if (elements.summaryTitle) {
+    elements.summaryTitle.textContent = `${year}年${month + 1}月のまとめ`;
+  }
+
+  const entries = getEntriesForMonth(year, month);
+  const summary = buildMonthSummary(entries);
+
+  if (!summary) {
+    elements.summaryContent.innerHTML =
+      '<div class="summary__empty">この月の記録はまだありません。</div>';
+    return;
+  }
+
+  const deltaHtml = (() => {
+    if (summary.weightDelta == null) return "";
+    if (Math.abs(summary.weightDelta) < 0.005) {
+      return '<span class="summary__stat-delta summary__stat-delta--flat">±0</span>';
+    }
+    const cls = summary.weightDelta > 0
+      ? "summary__stat-delta--up"
+      : "summary__stat-delta--down";
+    const sign = summary.weightDelta > 0 ? "+" : "";
+    return `<span class="summary__stat-delta ${cls}">${sign}${summary.weightDelta.toFixed(2)} kg</span>`;
+  })();
+
+  elements.summaryContent.innerHTML = `
+    <div class="summary__section">
+      <h3>体重と基本情報</h3>
+      <div class="summary__stats">
+        <div class="summary__stat-tile">
+          <span>記録した日数</span>
+          <strong>${summary.daysRecorded} 日</strong>
+        </div>
+        <div class="summary__stat-tile">
+          <span>体重変化</span>
+          <strong>${summary.lastWeight != null ? summary.lastWeight.toFixed(2) + " kg" : "--"}${deltaHtml}</strong>
+        </div>
+        <div class="summary__stat-tile">
+          <span>平均体重</span>
+          <strong>${summary.avgWeight != null ? summary.avgWeight.toFixed(2) + " kg" : "--"}</strong>
+        </div>
+        <div class="summary__stat-tile">
+          <span>最大 / 最小</span>
+          <strong>${summary.maxWeight != null ? summary.maxWeight.toFixed(2) : "--"} / ${summary.minWeight != null ? summary.minWeight.toFixed(2) : "--"} kg</strong>
+        </div>
+        <div class="summary__stat-tile">
+          <span>うんち合計</span>
+          <strong>${summary.poopSum} 回${summary.poopAvg != null ? ` <span class="summary__stat-delta summary__stat-delta--flat">平均 ${summary.poopAvg.toFixed(1)} 回/日</span>` : ""}</strong>
+        </div>
+        ${summary.avgOwnerWeight != null ? `
+          <div class="summary__stat-tile">
+            <span>飼い主の平均体重</span>
+            <strong>${summary.avgOwnerWeight.toFixed(1)} kg</strong>
+          </div>` : ""}
+      </div>
+    </div>
+
+    ${summary.topFoods.length ? `
+      <div class="summary__section">
+        <h3>よく食べたもの</h3>
+        <ol class="summary__ranking">
+          ${summary.topFoods.map(([label, count]) => `
+            <li><span>${escapeHtml(label)}</span><span>${count} 回</span></li>
+          `).join("")}
+        </ol>
+      </div>` : ""}
+
+    ${summary.tagCounts.length ? `
+      <div class="summary__section">
+        <h3>健康状態の傾向</h3>
+        <div class="summary__tag-chips">
+          ${summary.tagCounts.map((t) => `
+            <span class="summary__tag-chip">${escapeHtml(t.tag)}<strong>${t.count}</strong></span>
+          `).join("")}
+        </div>
+      </div>` : ""}
+
+    ${summary.photos.length ? `
+      <div class="summary__section">
+        <h3>今月の写真 (${summary.photos.length}枚)</h3>
+        <div class="summary__photos" id="summary-photos">
+          ${summary.photos.map((p) => `
+            <div class="summary__photo" data-entry-id="${escapeHtml(p.entryId)}" title="${escapeHtml(formatDate(p.date))}">
+              <img data-photo-id="${escapeHtml(p.fileId)}" alt="">
+            </div>
+          `).join("")}
+        </div>
+      </div>` : ""}
+  `;
+
+  const photoEls = elements.summaryContent.querySelectorAll(".summary__photo img");
+  photoEls.forEach((img) => {
+    const fileId = img.dataset.photoId;
+    if (fileId) loadPhotoInto(img, fileId);
+  });
+
+  const photoTiles = elements.summaryContent.querySelectorAll(".summary__photo");
+  photoTiles.forEach((tile) => {
+    tile.addEventListener("click", () => {
+      const id = tile.dataset.entryId;
+      if (id) startEditing(id);
+    });
+  });
+}
+
+function maybeNotifyMonthlyTransition() {
+  const today = new Date();
+  const currentKey =
+    `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const stored = localStorage.getItem(STORAGE_KEYS.lastSeenMonth);
+  if (stored && stored !== currentKey) {
+    const [py, pm] = stored.split("-").map(Number);
+    if (Number.isFinite(py) && Number.isFinite(pm)) {
+      const prevMonth = pm - 1; // 0-based
+      const prevEntries = getEntriesForMonth(py, prevMonth);
+      if (prevEntries.length > 0) {
+        state.summaryMonth = { year: py, month: prevMonth };
+        renderSummary();
+        showToast(`${py}年${pm}月のまとめが見られます`);
+      }
+    }
+  }
+  localStorage.setItem(STORAGE_KEYS.lastSeenMonth, currentKey);
 }
 
 function shiftCalendarMonth(delta) {
@@ -1433,7 +1711,15 @@ function renderEntries() {
     elements.entriesEmpty.textContent = "まだ記録がありません。最初の 1 件を追加してみましょう。";
   }
 
-  visible.forEach((entry) => {
+  const totalPages = Math.max(1, Math.ceil(visible.length / ENTRIES_PAGE_SIZE));
+  if (state.entriesPage > totalPages) state.entriesPage = totalPages;
+  if (state.entriesPage < 1) state.entriesPage = 1;
+  const start = (state.entriesPage - 1) * ENTRIES_PAGE_SIZE;
+  const pageEntries = visible.slice(start, start + ENTRIES_PAGE_SIZE);
+
+  renderEntriesPagination(visible.length, totalPages, start, pageEntries.length);
+
+  pageEntries.forEach((entry) => {
     const article = document.createElement("article");
     article.className = "entry-card";
     article.dataset.entryId = entry.id;
@@ -1715,6 +2001,7 @@ function restoreUserPreferences() {
 
   const today = new Date();
   state.calendarMonth = { year: today.getFullYear(), month: today.getMonth() };
+  state.summaryMonth = { year: today.getFullYear(), month: today.getMonth() };
 }
 
 function clearDriveState() {
